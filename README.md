@@ -28,7 +28,7 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 - `copied_docs`, `total_docs`
 - `last_logged_percent`
 
-같은 `--job-id`로 다시 실행하면 중단 지점부터 이어서 진행합니다.
+같은 `job_id`로 다시 실행하면 중단 지점부터 이어서 진행합니다.
 
 ## 설정 파일(JSON)
 
@@ -36,10 +36,18 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 
 ```json
 {
-  "source_uri": "mongodb://source-host:27017",
-  "target_uri": "mongodb://target-host:27017",
-  "source_db": "app",
-  "target_db": "app_migrated",
+  "source": {
+    "uri": "mongodb://source-host-1:27017,source-host-2:27017,source-host-3:27017/?replicaSet=rs0",
+    "database": "app",
+    "kind": "replica_set",
+    "read_preference": "primary"
+  },
+  "target": {
+    "uri": "mongodb://target-host:27017",
+    "database": "app_migrated",
+    "kind": "standalone",
+    "direct_connection": true
+  },
   "job_id": "snapshot-20260306",
   "meta_prefix": "__mongomery",
   "batch_size": 1000,
@@ -47,16 +55,44 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 }
 ```
 
-필드 설명:
+### 공통 필드
 
-- `source_uri`: 소스 MongoDB URI (필수)
-- `target_uri`: 타겟 MongoDB URI (필수)
-- `source_db`: 소스 DB 이름 (필수)
-- `target_db`: 타겟 DB 이름 (필수)
+- `source`, `target`: 각 Mongo 연결 설정
 - `job_id`: 재시작 기준 작업 ID (기본 `default`)
 - `meta_prefix`: 메타 컬렉션 prefix (기본 `__mongomery`)
 - `batch_size`: 데이터 복제 배치 크기 (기본 `1000`)
 - `log_percent_step`: 퍼센트 로그 간격 (기본 `5`)
+
+### source/target 연결 필드
+
+- `uri` (필수): MongoDB URI
+- `database` (필수): DB 이름
+- `kind`: `auto` | `standalone` | `replica_set` | `documentdb` (기본 `auto`)
+- `replica_set`: replica set 이름 오버라이드
+- `direct_connection`: 단일 노드 직접 연결 여부
+- `retry_writes`: retryWrites 설정 오버라이드
+- `read_preference`: `primary`, `primaryPreferred`, `secondary`, `secondaryPreferred`, `nearest`
+- `app_name`: Mongo app name
+- `auth_source`: auth DB 오버라이드
+- `tls`: TLS 사용 여부
+- `tls_ca_file`: CA PEM 파일 경로
+- `tls_insecure_skip_verify`: TLS 인증서 검증 skip (운영 비권장)
+- `connect_timeout_ms`, `server_selection_timeout_ms`, `socket_timeout_ms`
+- `max_pool_size`, `min_pool_size`
+
+### DocumentDB 기본값
+
+`kind: "documentdb"`를 지정하면 아래 기본값이 자동 적용됩니다(명시값 우선).
+
+- `tls = true`
+- `retry_writes = false`
+- `replica_set = "rs0"`
+- `read_preference = "secondaryPreferred"`
+
+예시 파일:
+
+- 일반/replica+standalone: `config.example.json`
+- DocumentDB 포함 예시: `config.documentdb.example.json`
 
 ## 실행
 
@@ -66,7 +102,7 @@ go run . --config ./config.json
 
 ## 로그
 
-컬렉션별로 `N%` 단위(`--log-percent-step`) 진행률을 출력합니다.
+컬렉션별로 `N%` 단위(`log_percent_step`) 진행률을 출력합니다.
 
 예시:
 

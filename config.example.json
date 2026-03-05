@@ -1,8 +1,16 @@
 {
-  "source_uri": "mongodb://source-host:27017",
-  "target_uri": "mongodb://target-host:27017",
-  "source_db": "app",
-  "target_db": "app_migrated",
+  "source": {
+    "uri": "mongodb://source-host-1:27017,source-host-2:27017,source-host-3:27017/?replicaSet=rs0",
+    "database": "app",
+    "kind": "replica_set",
+    "read_preference": "primary"
+  },
+  "target": {
+    "uri": "mongodb://target-host:27017",
+    "database": "app_migrated",
+    "kind": "standalone",
+    "direct_connection": true
+  },
   "job_id": "snapshot-20260306",
   "meta_prefix": "__mongomery",
   "batch_size": 1000,

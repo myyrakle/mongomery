@@ -61,12 +61,23 @@ func New(cfg Config) (*Migrator, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	sourceClient, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.SourceURI))
+	sourceOpts, err := buildClientOptions(cfg.Source)
+	if err != nil {
+		return nil, fmt.Errorf("build source mongo client options: %w", err)
+	}
+
+	sourceClient, err := mongo.Connect(ctx, sourceOpts)
 	if err != nil {
 		return nil, fmt.Errorf("connect source mongo: %w", err)
 	}
 
-	targetClient, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.TargetURI))
+	targetOpts, err := buildClientOptions(cfg.Target)
+	if err != nil {
+		_ = sourceClient.Disconnect(context.Background())
+		return nil, fmt.Errorf("build target mongo client options: %w", err)
+	}
+
+	targetClient, err := mongo.Connect(ctx, targetOpts)
 	if err != nil {
 		_ = sourceClient.Disconnect(context.Background())
 		return nil, fmt.Errorf("connect target mongo: %w", err)
@@ -90,10 +101,10 @@ func New(cfg Config) (*Migrator, error) {
 		cfg:            cfg,
 		sourceClient:   sourceClient,
 		targetClient:   targetClient,
-		sourceDB:       sourceClient.Database(cfg.SourceDB),
-		targetDB:       targetClient.Database(cfg.TargetDB),
-		jobsColl:       targetClient.Database(cfg.TargetDB).Collection(jobsName),
-		progressColl:   targetClient.Database(cfg.TargetDB).Collection(progressName),
+		sourceDB:       sourceClient.Database(cfg.Source.Database),
+		targetDB:       targetClient.Database(cfg.Target.Database),
+		jobsColl:       targetClient.Database(cfg.Target.Database).Collection(jobsName),
+		progressColl:   targetClient.Database(cfg.Target.Database).Collection(progressName),
 		jobsCollName:   jobsName,
 		progressCollID: progressName,
 	}
@@ -136,7 +147,7 @@ func (m *Migrator) Run(ctx context.Context) error {
 	}
 
 	if len(collections) == 0 {
-		log.Printf("no collections found in source db=%s", m.cfg.SourceDB)
+		log.Printf("no collections found in source db=%s", m.cfg.Source.Database)
 		return nil
 	}
 
@@ -176,7 +187,7 @@ func (m *Migrator) Run(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("migration complete job_id=%s source=%s target=%s", m.cfg.JobID, m.cfg.SourceDB, m.cfg.TargetDB)
+	log.Printf("migration complete job_id=%s source=%s target=%s", m.cfg.JobID, m.cfg.Source.Database, m.cfg.Target.Database)
 	return nil
 }
 
@@ -264,8 +275,8 @@ func (m *Migrator) upsertJob(ctx context.Context, totalCollections int, status s
 	filter := bson.M{"_id": m.cfg.JobID}
 	update := bson.M{
 		"$set": bson.M{
-			"source_db":         m.cfg.SourceDB,
-			"target_db":         m.cfg.TargetDB,
+			"source_db":         m.cfg.Source.Database,
+			"target_db":         m.cfg.Target.Database,
 			"status":            status,
 			"total_collections": totalCollections,
 			"updated_at":        now,

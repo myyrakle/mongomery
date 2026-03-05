@@ -1,0 +1,18 @@
+{
+  "source": {
+    "uri": "mongodb://user:password@docdb-cluster.cluster-xxxxxxxxxxxx.us-east-1.docdb.amazonaws.com:27017/?tls=true",
+    "database": "app",
+    "kind": "documentdb",
+    "tls_ca_file": "/path/to/global-bundle.pem"
+  },
+  "target": {
+    "uri": "mongodb://target-rs-1:27017,target-rs-2:27017,target-rs-3:27017/?replicaSet=rs0",
+    "database": "app_migrated",
+    "kind": "replica_set",
+    "read_preference": "primary"
+  },
+  "job_id": "snapshot-docdb-20260306",
+  "meta_prefix": "__mongomery",
+  "batch_size": 1000,
+  "log_percent_step": 5
+}
