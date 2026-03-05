@@ -1,0 +1,181 @@
+{
+  // source: 데이터를 읽어올 원본 Mongo 계열 서버 연결 설정입니다.
+  "source": {
+    // uri (필수):
+    // - MongoDB 연결 문자열
+    // - 단일 노드/레플리카셋/DocumentDB 모두 지원
+    // - 예: mongodb://host1:27017,host2:27017/?replicaSet=rs0
+    "uri": "mongodb://source-host-1:27017,source-host-2:27017,source-host-3:27017/?replicaSet=rs0",
+
+    // database (필수):
+    // - source 쪽에서 복제할 데이터베이스 이름
+    "database": "app",
+
+    // kind (선택, 기본 auto):
+    // - auto | standalone | replica_set | documentdb
+    // - documentdb 지정 시 아래 기본값이 자동 적용됨:
+    //   tls=true, retry_writes=false, replica_set=rs0, read_preference=secondaryPreferred
+    "kind": "replica_set",
+
+    // replica_set (선택):
+    // - URI에 replicaSet이 없어도 강제로 지정 가능
+    // - DocumentDB는 일반적으로 rs0 사용
+    "replica_set": "rs0",
+
+    // direct_connection (선택):
+    // - true: 단일 노드에 직접 연결
+    // - false: 토폴로지(standalone/replica set) 자동 판별
+    // - standalone 환경에서 true를 주면 초기 탐색 비용을 줄일 수 있음
+    "direct_connection": false,
+
+    // retry_writes (선택):
+    // - true/false로 retryWrites 동작을 명시적으로 제어
+    // - DocumentDB는 일반적으로 false 권장
+    "retry_writes": true,
+
+    // read_preference (선택):
+    // - primary | primaryPreferred | secondary | secondaryPreferred | nearest
+    // - source 읽기 분산이 필요하면 secondary 계열 사용 가능
+    "read_preference": "primary",
+
+    // app_name (선택):
+    // - 서버 로그/모니터링에서 클라이언트 식별용 이름
+    "app_name": "mongomery-source",
+
+    // auth_source (선택):
+    // - 인증 DB를 URI와 다르게 강제 지정할 때 사용
+    "auth_source": "admin",
+
+    // tls (선택):
+    // - true면 TLS 연결 강제
+    // - false면 TLS 비활성화(URI 파라미터보다 코드 설정이 우선될 수 있음)
+    "tls": false,
+
+    // tls_ca_file (선택):
+    // - TLS 서버 인증에 사용할 CA 번들 PEM 경로
+    // - 사설 CA/DocumentDB(global-bundle.pem) 환경에서 주로 사용
+    "tls_ca_file": "",
+
+    // tls_insecure_skip_verify (선택, 기본 false):
+    // - true면 서버 인증서 검증을 건너뜀
+    // - 운영 환경에서는 보안상 비권장
+    "tls_insecure_skip_verify": false,
+
+    // connect_timeout_ms (선택):
+    // - 초기 TCP 연결 타임아웃(ms), 0이면 드라이버 기본값 사용
+    "connect_timeout_ms": 10000,
+
+    // server_selection_timeout_ms (선택):
+    // - 적절한 서버 선택 대기 시간(ms), 0이면 드라이버 기본값 사용
+    "server_selection_timeout_ms": 30000,
+
+    // socket_timeout_ms (선택):
+    // - 소켓 read/write 타임아웃(ms), 0이면 드라이버 기본값 사용
+    "socket_timeout_ms": 0,
+
+    // max_pool_size (선택):
+    // - 커넥션 풀 최대 크기, 0이면 드라이버 기본값 사용
+    "max_pool_size": 100,
+
+    // min_pool_size (선택):
+    // - 커넥션 풀 최소 크기, 0이면 드라이버 기본값 사용
+    // - max_pool_size보다 클 수 없음
+    "min_pool_size": 0
+  },
+
+  // target: 데이터를 쓸 대상 Mongo 계열 서버 연결 설정입니다.
+  "target": {
+    // uri (필수):
+    // - MongoDB 연결 문자열
+    // - 타겟이 레플리카셋이면 다중 호스트 + replicaSet 파라미터 권장
+    "uri": "mongodb://target-host:27017",
+
+    // database (필수):
+    // - 복제된 데이터가 저장될 대상 데이터베이스 이름
+    "database": "app_migrated",
+
+    // kind (선택, 기본 auto):
+    // - auto | standalone | replica_set | documentdb
+    // - 타겟이 DocumentDB일 경우 documentdb 권장
+    "kind": "standalone",
+
+    // replica_set (선택):
+    // - 타겟 레플리카셋 이름을 강제로 지정할 때 사용
+    "replica_set": "",
+
+    // direct_connection (선택):
+    // - standalone 노드에 직접 붙을 때 true 권장
+    // - 레플리카셋 환경에서는 false 또는 미설정 권장
+    "direct_connection": true,
+
+    // retry_writes (선택):
+    // - 타겟 쓰기 재시도 동작 제어
+    // - DocumentDB 타겟이라면 false 고려
+    "retry_writes": true,
+
+    // read_preference (선택):
+    // - 쓰기는 primary로 가므로 보통 primary 사용
+    // - ping/metadata 조회 시 read preference에 영향
+    "read_preference": "primary",
+
+    // app_name (선택):
+    // - 타겟 서버 모니터링 로그에 표시될 애플리케이션 이름
+    "app_name": "mongomery-target",
+
+    // auth_source (선택):
+    // - 타겟 인증 DB 강제 지정
+    "auth_source": "admin",
+
+    // tls (선택):
+    // - 타겟 TLS 연결 활성화 여부
+    "tls": false,
+
+    // tls_ca_file (선택):
+    // - 타겟 TLS 검증용 CA PEM 파일 경로
+    "tls_ca_file": "",
+
+    // tls_insecure_skip_verify (선택, 기본 false):
+    // - 타겟 인증서 검증 생략 여부(운영 비권장)
+    "tls_insecure_skip_verify": false,
+
+    // connect_timeout_ms (선택):
+    // - 타겟 초기 연결 타임아웃(ms)
+    "connect_timeout_ms": 10000,
+
+    // server_selection_timeout_ms (선택):
+    // - 타겟 서버 선택 대기 시간(ms)
+    "server_selection_timeout_ms": 30000,
+
+    // socket_timeout_ms (선택):
+    // - 타겟 소켓 read/write 타임아웃(ms)
+    "socket_timeout_ms": 0,
+
+    // max_pool_size (선택):
+    // - 타겟 커넥션 풀 최대 크기
+    "max_pool_size": 100,
+
+    // min_pool_size (선택):
+    // - 타겟 커넥션 풀 최소 크기 (max_pool_size 이하)
+    "min_pool_size": 0
+  },
+
+  // job_id (선택, 기본 "default"):
+  // - 체크포인트/재시작을 식별하는 마이그레이션 작업 ID
+  // - 같은 job_id로 재실행하면 이어서 복제
+  "job_id": "snapshot-20260306",
+
+  // meta_prefix (선택, 기본 "__mongomery"):
+  // - target DB에 생성되는 메타 컬렉션 prefix
+  // - 실제 컬렉션: <meta_prefix>_jobs, <meta_prefix>_collections
+  "meta_prefix": "__mongomery",
+
+  // batch_size (선택, 기본 1000):
+  // - _id 커서 조회/InsertMany 단위 문서 수
+  // - 너무 크면 메모리/네트워크 부하 증가, 너무 작으면 처리량 저하
+  "batch_size": 1000,
+
+  // log_percent_step (선택, 기본 5):
+  // - 컬렉션별 진행률 로그 출력 간격(%)
+  // - 1~100 범위만 허용
+  "log_percent_step": 5
+}

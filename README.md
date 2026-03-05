@@ -89,6 +89,13 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 - `replica_set = "rs0"`
 - `read_preference = "secondaryPreferred"`
 
+### 주석 달린 템플릿(JSONC)
+
+JSON 표준은 주석을 지원하지 않기 때문에, 필드별 상세 코멘트는 별도 JSONC 파일에 제공합니다.
+
+- 상세 코멘트 템플릿: `config.annotated.example.jsonc`
+- 실행용 순수 JSON 예시: `config.example.json`, `config.documentdb.example.json`
+
 예시 파일:
 
 - 일반/replica+standalone: `config.example.json`
