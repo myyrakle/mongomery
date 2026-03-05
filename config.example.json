@@ -1,0 +1,10 @@
+{
+  "source_uri": "mongodb://source-host:27017",
+  "target_uri": "mongodb://target-host:27017",
+  "source_db": "app",
+  "target_db": "app_migrated",
+  "job_id": "snapshot-20260306",
+  "meta_prefix": "__mongomery",
+  "batch_size": 1000,
+  "log_percent_step": 5
+}
