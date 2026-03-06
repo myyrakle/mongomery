@@ -1,7 +1,13 @@
 {
   // source: 데이터를 읽어올 원본 Mongo 계열 서버 연결 설정입니다.
   "source": {
-    // host (필수):
+    // full_uri (선택):
+    // - 전체 MongoDB 연결 URI를 그대로 사용합니다.
+    // - 지정하면 host/username/password는 사용하지 않습니다.
+    // - 예: "mongodb://user:pass@source-host:27017/source_db?replicaSet=rs0&tls=true"
+    // "full_uri": "mongodb://source-host:27017/source_db",
+
+    // host (선택):
     // - 단일 노드/단일 엔드포인트일 때 사용합니다.
     // - 다중 노드도 CSV 형식으로 입력할 수 있습니다.
     // - 예: "source-host-1:27017" 또는 "source-host-1:27017,source-host-2:27017"
@@ -94,7 +100,13 @@
 
   // target: 데이터를 쓸 대상 Mongo 계열 서버 연결 설정입니다.
   "target": {
-    // host (필수):
+    // full_uri (선택):
+    // - 전체 MongoDB 연결 URI를 그대로 사용합니다.
+    // - 지정하면 host/username/password는 사용하지 않습니다.
+    // - 예: "mongodb+srv://target-cluster.example.com/app_migrated"
+    // "full_uri": "mongodb://target-host:27017/app_migrated",
+
+    // host (선택):
     // - 단일 노드/단일 엔드포인트일 때 사용합니다.
     // - 다중 노드는 CSV 형식으로 입력할 수 있습니다.
     // - 예: "target-host:27017" 또는 "target-rs-1:27017,target-rs-2:27017"

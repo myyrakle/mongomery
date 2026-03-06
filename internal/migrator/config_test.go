@@ -35,6 +35,52 @@ func TestLoadConfig_AppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AcceptsFullURIWithoutHost(t *testing.T) {
+	t.Parallel()
+
+	cfg := mustLoadConfigFromJSON(t, `{
+		"source": {"full_uri":"mongodb://source:27017,source2:27017","database":"app"},
+		"target": {"full_uri":"mongodb+srv://target.example.com","database":"app_copy"}
+	}`)
+
+	if cfg.Source.Host != "" {
+		t.Fatalf("expected source.host to be optional when full_uri provided")
+	}
+	if cfg.Target.Host != "" {
+		t.Fatalf("expected target.host to be optional when full_uri provided")
+	}
+}
+
+func TestLoadConfig_RejectsMissingConnectionInfo(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {"database":"app"},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for missing source host and full_uri")
+	}
+	if !strings.Contains(err.Error(), "source: host is required") {
+		t.Fatalf("expected host required error, got: %v", err)
+	}
+}
+
+func TestLoadConfig_RejectsInvalidFullURI(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {"full_uri":"http://source:27017","database":"app"},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for invalid full_uri")
+	}
+	if !strings.Contains(err.Error(), "full_uri has unsupported scheme") {
+		t.Fatalf("expected unsupported full_uri scheme error, got: %v", err)
+	}
+}
+
 func TestLoadConfig_AppliesStandaloneAndReplicaDefaults(t *testing.T) {
 	t.Parallel()
 

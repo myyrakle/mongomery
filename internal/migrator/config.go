@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -29,6 +30,7 @@ type Config struct {
 // MongoConnectionConfig controls how each MongoDB endpoint is initialized.
 type MongoConnectionConfig struct {
 	Host                     string `json:"host"`
+	FullURI                  string `json:"full_uri"`
 	Username                 string `json:"username"`
 	Password                 string `json:"password"`
 	Database                 string `json:"database"`
@@ -205,6 +207,44 @@ func (c MongoConnectionConfig) Validate(field string) error {
 }
 
 func (c MongoConnectionConfig) resolvedHosts() ([]string, error) {
+	if strings.TrimSpace(c.FullURI) != "" {
+		return c.resolvedHostsFromURI()
+	}
+	return c.resolvedHostsFromHostCSV()
+}
+
+func (c MongoConnectionConfig) resolvedHostsFromURI() ([]string, error) {
+	fullURI := strings.TrimSpace(c.FullURI)
+	parsed, err := url.Parse(fullURI)
+	if err != nil {
+		return nil, fmt.Errorf("full_uri is invalid: %w", err)
+	}
+	switch parsed.Scheme {
+	case "mongodb", "mongodb+srv":
+	default:
+		return nil, fmt.Errorf("full_uri has unsupported scheme %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return nil, errors.New("full_uri must include at least one host")
+	}
+
+	parts := strings.Split(parsed.Host, ",")
+	hosts := make([]string, 0, len(parts))
+	for _, host := range parts {
+		h := strings.TrimSpace(host)
+		if h == "" {
+			continue
+		}
+		hosts = append(hosts, h)
+	}
+	if len(hosts) == 0 {
+		return nil, errors.New("full_uri must include at least one host")
+	}
+
+	return hosts, nil
+}
+
+func (c MongoConnectionConfig) resolvedHostsFromHostCSV() ([]string, error) {
 	raw := strings.TrimSpace(c.Host)
 	if raw == "" {
 		return nil, errors.New("host is required")

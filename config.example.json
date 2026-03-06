@@ -8,9 +8,7 @@
     "read_preference": "primary"
   },
   "target": {
-    "host": "target-host:27017",
-    "username": "myuser",
-    "password": "target-password",
+    "full_uri": "mongodb://target-host:27017,backup-target:27017/app_migrated",
     "database": "app_migrated",
     "kind": "standalone",
     "direct_connection": true

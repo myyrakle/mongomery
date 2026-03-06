@@ -69,7 +69,9 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 
 ### source/target 연결 필드
 
-- `host` (필수): 단일 엔드포인트 또는 CSV 형태 다중 엔드포인트 (`host:27017` 또는 `host1:27017,host2:27017`)
+- `full_uri` (선택): 전체 MongoDB 연결 URI를 그대로 사용할 때 사용 (`mongodb://...`, `mongodb+srv://...`)
+- `host` (선택): 단일 엔드포인트 또는 CSV 형태 다중 엔드포인트 (`host:27017` 또는 `host1:27017,host2:27017`)  
+  `full_uri`가 비어 있으면 필수
 - `database` (필수): DB 이름
 - `username`: 사용자명
 - `password`: 비밀번호

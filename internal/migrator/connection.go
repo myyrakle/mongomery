@@ -77,6 +77,10 @@ func buildClientOptions(cfg MongoConnectionConfig) (*options.ClientOptions, erro
 }
 
 func buildConnectionURI(cfg MongoConnectionConfig) (string, error) {
+	if strings.TrimSpace(cfg.FullURI) != "" {
+		return strings.TrimSpace(cfg.FullURI), nil
+	}
+
 	hosts, err := cfg.resolvedHosts()
 	if err != nil {
 		return "", err

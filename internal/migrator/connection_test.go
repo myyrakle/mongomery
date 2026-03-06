@@ -103,6 +103,23 @@ func TestBuildConnectionURI_WithCredentialsAndHost(t *testing.T) {
 	}
 }
 
+func TestBuildConnectionURI_UsesFullURI(t *testing.T) {
+	t.Parallel()
+
+	full := "mongodb://admin:secret@fulluri:27017/mydb?tls=true"
+	cfg := MongoConnectionConfig{
+		FullURI:  full,
+		Database: "should_be_unused_for_uri_construction",
+	}
+	uri, err := buildConnectionURI(cfg)
+	if err != nil {
+		t.Fatalf("buildConnectionURI failed: %v", err)
+	}
+	if uri != full {
+		t.Fatalf("expected full uri passthrough, expected %q got %q", full, uri)
+	}
+}
+
 func TestBuildConnectionURI_RejectsMissingHost(t *testing.T) {
 	t.Parallel()
 
