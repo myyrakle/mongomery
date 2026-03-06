@@ -51,6 +51,21 @@ func TestLoadConfig_AcceptsFullURIWithoutHost(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_UsesDatabaseFromFullURIPathWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	cfg := mustLoadConfigFromJSON(t, `{
+		"source": {"full_uri":"mongodb+srv://source.example.com/app","kind":"replica_set"},
+		"target": {"full_uri":"mongodb+srv://target.example.com/app_copy","kind":"replica_set"}
+	}`)
+	if cfg.Source.Database != "app" {
+		t.Fatalf("expected source.database inferred from full_uri path, got %q", cfg.Source.Database)
+	}
+	if cfg.Target.Database != "app_copy" {
+		t.Fatalf("expected target.database inferred from full_uri path, got %q", cfg.Target.Database)
+	}
+}
+
 func TestLoadConfig_RejectsMissingConnectionInfo(t *testing.T) {
 	t.Parallel()
 
@@ -94,6 +109,51 @@ func TestLoadConfig_AppliesStandaloneAndReplicaDefaults(t *testing.T) {
 	}
 	if cfg.Target.DirectConnection == nil || *cfg.Target.DirectConnection {
 		t.Fatalf("expected replica_set target direct_connection=false default")
+	}
+}
+
+func TestLoadConfig_AdjustsStandaloneSRVDefaultDirectConnection(t *testing.T) {
+	t.Parallel()
+
+	cfg := mustLoadConfigFromJSON(t, `{
+		"source": {
+			"full_uri":"mongodb+srv://source-cluster.example.com/app",
+			"database":"app",
+			"kind":"standalone"
+		},
+		"target": {
+			"host":"target:27017",
+			"database":"app_copy",
+			"kind":"replica_set"
+		}
+	}`)
+
+	if cfg.Source.DirectConnection == nil || *cfg.Source.DirectConnection {
+		t.Fatalf("expected standalone full_uri mongodb+srv default direct_connection=false")
+	}
+}
+
+func TestLoadConfig_RejectsStandaloneSRVWithDirectConnectionTrue(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {
+			"full_uri":"mongodb+srv://source-cluster.example.com/app",
+			"database":"app",
+			"kind":"standalone",
+			"direct_connection": true
+		},
+		"target": {
+			"host":"target:27017",
+			"database":"app_copy",
+			"kind":"replica_set"
+		}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for mongodb+srv with direct_connection=true")
+	}
+	if !strings.Contains(err.Error(), "source.direct_connection cannot be true with mongodb+srv full_uri") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -195,6 +255,48 @@ func TestLoadConfig_RejectsHostWithUriLikeFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "host value") {
 		t.Fatalf("expected host scheme error, got: %v", err)
+	}
+}
+
+func TestLoadConfig_AcceptsSRVHostMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := mustLoadConfigFromJSON(t, `{
+		"source": {
+			"host":"aims-aws-kr-prod.clrl7.mongodb.net",
+			"srv": true,
+			"username": "aims",
+			"password": "pwd",
+			"database":"acloset-prod",
+			"kind":"replica_set"
+		},
+		"target": {"host":"127.0.0.1:27018","database":"app_copy","kind":"standalone","direct_connection":true}
+	}`)
+	if cfg.Source.UseSRV != true {
+		t.Fatalf("expected source.srv=true")
+	}
+	if cfg.Source.DirectConnection == nil || *cfg.Source.DirectConnection {
+		t.Fatalf("expected source direct_connection=false for srv mode")
+	}
+}
+
+func TestLoadConfig_RejectsSRVWithPort(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {
+			"host":"aims-aws-kr-prod.clrl7.mongodb.net:27017",
+			"srv": true,
+			"database":"acloset-prod",
+			"kind":"replica_set"
+		},
+		"target": {"host":"127.0.0.1:27018","database":"app_copy","kind":"standalone","direct_connection":true}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for srv mode with port")
+	}
+	if !strings.Contains(err.Error(), "srv=true expects host without port") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -80,6 +80,9 @@ func buildConnectionURI(cfg MongoConnectionConfig) (string, error) {
 	if strings.TrimSpace(cfg.FullURI) != "" {
 		return strings.TrimSpace(cfg.FullURI), nil
 	}
+	if cfg.UseSRV {
+		return buildSRVConnectionURI(cfg)
+	}
 
 	hosts, err := cfg.resolvedHosts()
 	if err != nil {
@@ -108,6 +111,37 @@ func buildConnectionURI(cfg MongoConnectionConfig) (string, error) {
 		query.Set("tls", strconv.FormatBool(*cfg.TLS))
 	}
 
+	if len(query) > 0 {
+		uri.RawQuery = query.Encode()
+	}
+
+	return uri.String(), nil
+}
+
+func buildSRVConnectionURI(cfg MongoConnectionConfig) (string, error) {
+	host, err := cfg.resolvedHostForSRV()
+	if err != nil {
+		return "", err
+	}
+
+	uri := &url.URL{
+		Scheme: "mongodb+srv",
+		Host:   strings.Join(host, ","),
+		Path:   "/" + cfg.Database,
+	}
+
+	if cfg.Username != "" {
+		if cfg.Password != "" {
+			uri.User = url.UserPassword(cfg.Username, cfg.Password)
+		} else {
+			uri.User = url.User(cfg.Username)
+		}
+	}
+
+	query := uri.Query()
+	if cfg.TLS != nil {
+		query.Set("tls", strconv.FormatBool(*cfg.TLS))
+	}
 	if len(query) > 0 {
 		uri.RawQuery = query.Encode()
 	}

@@ -31,6 +31,7 @@ type Config struct {
 type MongoConnectionConfig struct {
 	FullURI                  string `json:"full_uri"`
 	Host                     string `json:"host"`
+	UseSRV                   bool   `json:"srv"`
 	Username                 string `json:"username"`
 	Password                 string `json:"password"`
 	Database                 string `json:"database"`
@@ -135,15 +136,32 @@ func (c *MongoConnectionConfig) applyDefaults() {
 	if c.Kind == "" {
 		c.Kind = connectionKindAuto
 	}
+	if strings.TrimSpace(c.Database) == "" && strings.TrimSpace(c.FullURI) != "" {
+		if parsedURI, err := url.Parse(strings.TrimSpace(c.FullURI)); err == nil {
+			c.Database = strings.TrimPrefix(parsedURI.Path, "/")
+		}
+	}
 
 	switch c.Kind {
 	case connectionKindStandalone:
 		if c.DirectConnection == nil {
-			c.DirectConnection = boolPtr(true)
+			// mongodb+srv does not support directConnection=true.
+			// 기본값은 standalone에서 true이지만, SRV URI인 경우엔 false로 보정한다.
+			if c.isFullSRVURI() || c.UseSRV {
+				c.DirectConnection = boolPtr(false)
+			} else {
+				c.DirectConnection = boolPtr(true)
+			}
+		}
+		if c.UseSRV && c.TLS == nil {
+			c.TLS = boolPtr(true)
 		}
 	case connectionKindReplicaSet:
 		if c.DirectConnection == nil {
 			c.DirectConnection = boolPtr(false)
+		}
+		if c.UseSRV && c.TLS == nil {
+			c.TLS = boolPtr(true)
 		}
 	case connectionKindDocumentDB:
 		if c.DirectConnection == nil {
@@ -187,6 +205,16 @@ func (c MongoConnectionConfig) Validate(field string) error {
 		}
 	}
 
+	if c.UseSRV {
+		if c.DirectConnection != nil && *c.DirectConnection {
+			return fmt.Errorf("%s.direct_connection cannot be true when srv is enabled; use false or omit", field)
+		}
+	}
+
+	if c.DirectConnection != nil && *c.DirectConnection && c.isFullSRVURI() {
+		return fmt.Errorf("%s.direct_connection cannot be true with mongodb+srv full_uri; set false or omit direct_connection", field)
+	}
+
 	if c.ConnectTimeoutMS < 0 {
 		return fmt.Errorf("%s.connect_timeout_ms must be >= 0", field)
 	}
@@ -210,7 +238,27 @@ func (c MongoConnectionConfig) resolvedHosts() ([]string, error) {
 	if strings.TrimSpace(c.FullURI) != "" {
 		return c.resolvedHostsFromURI()
 	}
+	if c.UseSRV {
+		return c.resolvedHostForSRV()
+	}
 	return c.resolvedHostsFromHostCSV()
+}
+
+func (c MongoConnectionConfig) resolvedHostForSRV() ([]string, error) {
+	raw := strings.TrimSpace(c.Host)
+	if raw == "" {
+		return nil, errors.New("host is required when srv=true")
+	}
+	if strings.Contains(raw, ",") {
+		return nil, errors.New("srv=true supports single host only")
+	}
+	if strings.Contains(raw, ":") {
+		return nil, errors.New("srv=true expects host without port")
+	}
+	if strings.Contains(raw, "://") {
+		return nil, fmt.Errorf("srv host %q must not include scheme", raw)
+	}
+	return []string{raw}, nil
 }
 
 func (c MongoConnectionConfig) resolvedHostsFromURI() ([]string, error) {
@@ -242,6 +290,18 @@ func (c MongoConnectionConfig) resolvedHostsFromURI() ([]string, error) {
 	}
 
 	return hosts, nil
+}
+
+func (c MongoConnectionConfig) isFullSRVURI() bool {
+	fullURI := strings.TrimSpace(c.FullURI)
+	if fullURI == "" {
+		return false
+	}
+	parsed, err := url.Parse(fullURI)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "mongodb+srv"
 }
 
 func (c MongoConnectionConfig) resolvedHostsFromHostCSV() ([]string, error) {

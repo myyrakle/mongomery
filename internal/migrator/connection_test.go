@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +118,25 @@ func TestBuildConnectionURI_UsesFullURI(t *testing.T) {
 	}
 	if uri != full {
 		t.Fatalf("expected full uri passthrough, expected %q got %q", full, uri)
+	}
+}
+
+func TestBuildConnectionURI_UsesSRVHostMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := MongoConnectionConfig{
+		Host:     "cluster0.abcde.mongodb.net",
+		Username: "admin",
+		Password: "pwd",
+		Database: "appdb",
+		UseSRV:   true,
+	}
+	uri, err := buildConnectionURI(cfg)
+	if err != nil {
+		t.Fatalf("buildConnectionURI failed: %v", err)
+	}
+	if !strings.HasPrefix(uri, "mongodb+srv://admin:pwd@cluster0.abcde.mongodb.net/appdb") {
+		t.Fatalf("unexpected uri: %q", uri)
 	}
 }
 

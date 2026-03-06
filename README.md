@@ -74,12 +74,15 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 - `full_uri` (선택): 전체 MongoDB 연결 URI를 그대로 사용할 때 사용 (`mongodb://...`, `mongodb+srv://...`)
 - `host` (선택): 단일 엔드포인트 또는 CSV 형태 다중 엔드포인트 (`host:27017` 또는 `host1:27017,host2:27017`)  
   `full_uri`가 비어 있으면 필수
-- `database` (필수): DB 이름
+- `srv` (선택): host가 Atlas-style SRV 클러스터명인 경우 `mongodb+srv://`로 연결 (`false` 기본)
+- `database` (필수): DB 이름. `full_uri`에 DB path가 있으면 생략해도 자동 추출됨.
 - `username`: 사용자명
 - `password`: 비밀번호
 - `kind`: `auto` | `standalone` | `replica_set` | `documentdb` (기본 `auto`)
 - `replica_set`: replica set 이름 오버라이드
-- `direct_connection`: 단일 노드 직접 연결 여부
+- `direct_connection`: 단일 노드 직접 연결 여부  
+  `full_uri`가 `mongodb+srv://`인 경우에는 `false`여야 하며, `standalone`에서 기본값은 `false`로 보정됩니다.
+- `srv`: `true`면 `host`를 `mongodb+srv://`로 해석
 - `retry_writes`: retryWrites 설정 오버라이드
 - `read_preference`: `primary`, `primaryPreferred`, `secondary`, `secondaryPreferred`, `nearest`
 - `app_name`: Mongo app name
@@ -92,9 +95,11 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 
 `kind`별 자동 기본값(명시값 우선):
 
-- `standalone`: `direct_connection=true`
+- `standalone`: 기본적으로 `direct_connection=true` (단, `mongodb+srv://` 사용 시 `false`로 보정)
 - `replica_set`: `direct_connection=false`
 - `documentdb`: `direct_connection=false`, `tls=true`, `retry_writes=false`, `replica_set=rs0`, `read_preference=secondaryPreferred`
+
+`full_uri`에 `mongodb+srv://`를 사용할 때 `direct_connection=true`는 지원되지 않습니다.
 
 ### DocumentDB 기본값
 
