@@ -48,8 +48,6 @@ type CollectionProgress struct {
 	CopiedDocs        int64       `bson:"copied_docs"`
 	LastID            interface{} `bson:"last_id,omitempty"`
 	Status            string      `bson:"status"`
-	Initialized       bool        `bson:"initialized"`
-	IndexesCloned     bool        `bson:"indexes_cloned"`
 	LastLoggedPercent int         `bson:"last_logged_percent"`
 	UpdatedAt         time.Time   `bson:"updated_at"`
 	StartedAt         time.Time   `bson:"started_at"`
@@ -344,7 +342,7 @@ func (m *Migrator) upsertJob(ctx context.Context, totalCollections int, status s
 func (m *Migrator) seedCollectionProgress(ctx context.Context, collections []collectionInfo) error {
 	now := time.Now().UTC()
 	for _, coll := range collections {
-		count, err := m.sourceDB.Collection(coll.Name).CountDocuments(ctx, bson.D{})
+		count, err := m.sourceDB.Collection(coll.Name).EstimatedDocumentCount(ctx)
 		if err != nil {
 			return fmt.Errorf("count documents for %s: %w", coll.Name, err)
 		}
@@ -362,8 +360,6 @@ func (m *Migrator) seedCollectionProgress(ctx context.Context, collections []col
 				"$setOnInsert": bson.M{
 					"copied_docs":         0,
 					"status":              collectionStatusPending,
-					"initialized":         false,
-					"indexes_cloned":      false,
 					"last_logged_percent": 0,
 					"started_at":          now,
 				},
@@ -393,6 +389,9 @@ func (m *Migrator) ensureTargetCollection(ctx context.Context, coll collectionIn
 				return fmt.Errorf("create target collection %s: %w", coll.Name, err)
 			}
 		}
+		log.Printf("schema=collection=%s created", coll.Name)
+	} else {
+		log.Printf("schema=collection=%s already_exists (skip)", coll.Name)
 	}
 
 	return nil
@@ -440,6 +439,7 @@ func (m *Migrator) cloneIndexesFromSource(ctx context.Context, collection string
 		return fmt.Errorf("create indexes for %s: %w", collection, err)
 	}
 
+	log.Printf("schema=collection=%s indexes=%d created", collection, len(indexes))
 	return nil
 }
 
@@ -476,6 +476,8 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		log.Printf("skip collection=%s reason=already_done", collection)
 		return nil
 	}
+
+	log.Printf("copy collection=%s total_docs=%d", collection, progress.TotalDocs)
 
 	sourceColl := m.sourceDB.Collection(collection)
 	targetColl := m.targetDB.Collection(collection)
