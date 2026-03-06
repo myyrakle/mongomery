@@ -66,12 +66,11 @@ func TestBuildTLSConfig_InvalidCAFile(t *testing.T) {
 	}
 }
 
-func TestBuildConnectionURI_WithCredentialsAndHosts(t *testing.T) {
+func TestBuildConnectionURI_WithCredentialsAndHost(t *testing.T) {
 	t.Parallel()
 
 	cfg := MongoConnectionConfig{
-		Host:     "mongo-primary:27017",
-		Hosts:    []string{"mongo-secondary:27017"},
+		Host:     "mongo-primary:27017,mongo-secondary:27017",
 		Username: "admin",
 		Password: "p@ss",
 		Database: "appdb",

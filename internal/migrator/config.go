@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 )
 
@@ -29,26 +28,25 @@ type Config struct {
 
 // MongoConnectionConfig controls how each MongoDB endpoint is initialized.
 type MongoConnectionConfig struct {
-	Host                     string   `json:"host"`
-	Hosts                    []string `json:"hosts"`
-	Username                 string   `json:"username"`
-	Password                 string   `json:"password"`
-	Database                 string   `json:"database"`
-	Kind                     string   `json:"kind"`
-	ReplicaSet               string   `json:"replica_set"`
-	DirectConnection         *bool    `json:"direct_connection"`
-	RetryWrites              *bool    `json:"retry_writes"`
-	ReadPreference           string   `json:"read_preference"`
-	AppName                  string   `json:"app_name"`
-	AuthSource               string   `json:"auth_source"`
-	TLS                      *bool    `json:"tls"`
-	TLSCAFile                string   `json:"tls_ca_file"`
-	TLSInsecureSkipVerify    bool     `json:"tls_insecure_skip_verify"`
-	ConnectTimeoutMS         int      `json:"connect_timeout_ms"`
-	ServerSelectionTimeoutMS int      `json:"server_selection_timeout_ms"`
-	SocketTimeoutMS          int      `json:"socket_timeout_ms"`
-	MaxPoolSize              uint64   `json:"max_pool_size"`
-	MinPoolSize              uint64   `json:"min_pool_size"`
+	Host                     string `json:"host"`
+	Username                 string `json:"username"`
+	Password                 string `json:"password"`
+	Database                 string `json:"database"`
+	Kind                     string `json:"kind"`
+	ReplicaSet               string `json:"replica_set"`
+	DirectConnection         *bool  `json:"direct_connection"`
+	RetryWrites              *bool  `json:"retry_writes"`
+	ReadPreference           string `json:"read_preference"`
+	AppName                  string `json:"app_name"`
+	AuthSource               string `json:"auth_source"`
+	TLS                      *bool  `json:"tls"`
+	TLSCAFile                string `json:"tls_ca_file"`
+	TLSInsecureSkipVerify    bool   `json:"tls_insecure_skip_verify"`
+	ConnectTimeoutMS         int    `json:"connect_timeout_ms"`
+	ServerSelectionTimeoutMS int    `json:"server_selection_timeout_ms"`
+	SocketTimeoutMS          int    `json:"socket_timeout_ms"`
+	MaxPoolSize              uint64 `json:"max_pool_size"`
+	MinPoolSize              uint64 `json:"min_pool_size"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -207,12 +205,14 @@ func (c MongoConnectionConfig) Validate(field string) error {
 }
 
 func (c MongoConnectionConfig) resolvedHosts() ([]string, error) {
-	hosts := make([]string, 0, len(c.Hosts)+1)
-
-	if strings.TrimSpace(c.Host) != "" {
-		hosts = append(hosts, strings.TrimSpace(c.Host))
+	raw := strings.TrimSpace(c.Host)
+	if raw == "" {
+		return nil, errors.New("host is required")
 	}
-	for _, host := range c.Hosts {
+
+	parts := strings.Split(raw, ",")
+	hosts := make([]string, 0, len(parts))
+	for _, host := range parts {
 		h := strings.TrimSpace(host)
 		if h == "" {
 			continue
@@ -221,7 +221,7 @@ func (c MongoConnectionConfig) resolvedHosts() ([]string, error) {
 	}
 
 	if len(hosts) == 0 {
-		return nil, errors.New("one of host or hosts is required")
+		return nil, errors.New("host is required")
 	}
 
 	for _, host := range hosts {
@@ -242,7 +242,8 @@ func (c MongoConnectionConfig) EndpointKey() string {
 	for i, host := range hosts {
 		normalized[i] = strings.ToLower(strings.TrimSpace(host))
 	}
-	sort.Strings(normalized)
+	// keep order stable while still normalizing whitespace/case;
+	// if hosts are repeated with different order in a CSV, users can pass in one canonical order.
 
 	return fmt.Sprintf("%s/%s", strings.Join(normalized, ","), c.Database)
 }

@@ -1,16 +1,11 @@
 {
   // source: 데이터를 읽어올 원본 Mongo 계열 서버 연결 설정입니다.
   "source": {
-    // host (선택):
+    // host (필수):
     // - 단일 노드/단일 엔드포인트일 때 사용합니다.
-    // - 예: "source-host-1:27017"
+    // - 다중 노드도 CSV 형식으로 입력할 수 있습니다.
+    // - 예: "source-host-1:27017" 또는 "source-host-1:27017,source-host-2:27017"
     "host": "source-host-1:27017",
-
-    // hosts (선택):
-    // - 다중 노드를 구성할 때 사용합니다.
-    // - 예: ["source-host-1:27017", "source-host-2:27017", "source-host-3:27017"]
-    // - host와 hosts 둘 중 하나는 필수입니다.
-    "hosts": ["source-host-2:27017", "source-host-3:27017"],
 
     // username (선택):
     // - 인증이 필요한 클러스터인 경우 사용자명
@@ -32,7 +27,7 @@
     "kind": "replica_set",
 
     // replica_set (선택):
-    // - hosts/host에 replica_set 파라미터가 없어도 강제로 지정 가능
+    // - host에 replica_set 파라미터가 없어도 강제로 지정 가능
     // - DocumentDB는 일반적으로 rs0 사용
     "replica_set": "rs0",
 
@@ -99,15 +94,11 @@
 
   // target: 데이터를 쓸 대상 Mongo 계열 서버 연결 설정입니다.
   "target": {
-    // host (선택):
+    // host (필수):
     // - 단일 노드/단일 엔드포인트일 때 사용합니다.
-    // - 예: "target-host:27017"
+    // - 다중 노드는 CSV 형식으로 입력할 수 있습니다.
+    // - 예: "target-host:27017" 또는 "target-rs-1:27017,target-rs-2:27017"
     "host": "target-host:27017",
-
-    // hosts (선택):
-    // - 다중 노드를 구성할 때 사용합니다.
-    // - 타겟이 레플리카셋이면 hosts 사용을 권장합니다.
-    "hosts": [],
 
     // username (선택):
     // - 인증 사용자명

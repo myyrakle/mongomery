@@ -40,7 +40,7 @@ func TestLoadConfig_AppliesStandaloneAndReplicaDefaults(t *testing.T) {
 
 	cfg := mustLoadConfigFromJSON(t, `{
 		"source": {"host":"source:27017","database":"app","kind":"standalone"},
-		"target": {"hosts":["target1:27017","target2:27017"],"database":"app_copy","kind":"replica_set"}
+		"target": {"host":"target1:27017,target2:27017","database":"app_copy","kind":"replica_set"}
 	}`)
 
 	if cfg.Source.DirectConnection == nil || !*cfg.Source.DirectConnection {
@@ -111,7 +111,7 @@ func TestLoadConfig_RejectsSameSourceAndTarget(t *testing.T) {
 	t.Parallel()
 
 	_, err := loadConfigFromJSON(t, `{
-		"source": {"hosts":["same:27017"],"database":"app"},
+		"source": {"host":"same:27017","database":"app"},
 		"target": {"host":"same:27017","database":"app"}
 	}`)
 	if err == nil {

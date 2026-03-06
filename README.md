@@ -37,7 +37,7 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 ```json
 {
   "source": {
-    "hosts": ["source-host-1:27017", "source-host-2:27017", "source-host-3:27017"],
+    "host": "source-host-1:27017",
     "username": "myuser",
     "password": "mypassword",
     "database": "app",
@@ -69,9 +69,7 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 
 ### source/target 연결 필드
 
-- `host` (선택): 단일 호스트/포트 (`host:27017`)
-- `hosts` (선택): 다중 호스트 배열 (`["host1:27017","host2:27017"]`)
-- `host` 또는 `hosts` 중 하나는 필수
+- `host` (필수): 단일 엔드포인트 또는 CSV 형태 다중 엔드포인트 (`host:27017` 또는 `host1:27017,host2:27017`)
 - `database` (필수): DB 이름
 - `username`: 사용자명
 - `password`: 비밀번호

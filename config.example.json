@@ -1,6 +1,6 @@
 {
   "source": {
-    "hosts": ["source-host-1:27017", "source-host-2:27017", "source-host-3:27017"],
+    "host": "source-host-1:27017",
     "username": "myuser",
     "password": "mypassword",
     "database": "app",

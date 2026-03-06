@@ -8,7 +8,7 @@
     "tls_ca_file": "/path/to/global-bundle.pem"
   },
   "target": {
-    "hosts": ["target-rs-1:27017", "target-rs-2:27017", "target-rs-3:27017"],
+    "host": "target-rs-1:27017",
     "database": "app_migrated",
     "kind": "replica_set",
     "read_preference": "primary"
