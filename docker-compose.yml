@@ -1,0 +1,28 @@
+services:
+  target-mongo:
+    image: mongo:7.0
+    container_name: mongomery-target-mongo
+    restart: unless-stopped
+    command: ["mongod", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "admin"
+      MONGO_INITDB_ROOT_PASSWORD: "admin-pass"
+      MONGO_INITDB_DATABASE: "app_migrated"
+    volumes:
+      - target-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--username", "admin", "--password", "admin-pass", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - target-net
+
+volumes:
+  target-mongo-data:
+
+networks:
+  target-net:
+    driver: bridge

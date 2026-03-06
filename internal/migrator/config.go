@@ -29,8 +29,8 @@ type Config struct {
 
 // MongoConnectionConfig controls how each MongoDB endpoint is initialized.
 type MongoConnectionConfig struct {
-	Host                     string `json:"host"`
 	FullURI                  string `json:"full_uri"`
+	Host                     string `json:"host"`
 	Username                 string `json:"username"`
 	Password                 string `json:"password"`
 	Database                 string `json:"database"`
