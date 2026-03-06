@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -28,23 +29,26 @@ type Config struct {
 
 // MongoConnectionConfig controls how each MongoDB endpoint is initialized.
 type MongoConnectionConfig struct {
-	URI                      string `json:"uri"`
-	Database                 string `json:"database"`
-	Kind                     string `json:"kind"`
-	ReplicaSet               string `json:"replica_set"`
-	DirectConnection         *bool  `json:"direct_connection"`
-	RetryWrites              *bool  `json:"retry_writes"`
-	ReadPreference           string `json:"read_preference"`
-	AppName                  string `json:"app_name"`
-	AuthSource               string `json:"auth_source"`
-	TLS                      *bool  `json:"tls"`
-	TLSCAFile                string `json:"tls_ca_file"`
-	TLSInsecureSkipVerify    bool   `json:"tls_insecure_skip_verify"`
-	ConnectTimeoutMS         int    `json:"connect_timeout_ms"`
-	ServerSelectionTimeoutMS int    `json:"server_selection_timeout_ms"`
-	SocketTimeoutMS          int    `json:"socket_timeout_ms"`
-	MaxPoolSize              uint64 `json:"max_pool_size"`
-	MinPoolSize              uint64 `json:"min_pool_size"`
+	Host                     string   `json:"host"`
+	Hosts                    []string `json:"hosts"`
+	Username                 string   `json:"username"`
+	Password                 string   `json:"password"`
+	Database                 string   `json:"database"`
+	Kind                     string   `json:"kind"`
+	ReplicaSet               string   `json:"replica_set"`
+	DirectConnection         *bool    `json:"direct_connection"`
+	RetryWrites              *bool    `json:"retry_writes"`
+	ReadPreference           string   `json:"read_preference"`
+	AppName                  string   `json:"app_name"`
+	AuthSource               string   `json:"auth_source"`
+	TLS                      *bool    `json:"tls"`
+	TLSCAFile                string   `json:"tls_ca_file"`
+	TLSInsecureSkipVerify    bool     `json:"tls_insecure_skip_verify"`
+	ConnectTimeoutMS         int      `json:"connect_timeout_ms"`
+	ServerSelectionTimeoutMS int      `json:"server_selection_timeout_ms"`
+	SocketTimeoutMS          int      `json:"socket_timeout_ms"`
+	MaxPoolSize              uint64   `json:"max_pool_size"`
+	MinPoolSize              uint64   `json:"min_pool_size"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -107,7 +111,7 @@ func (c Config) Validate() error {
 	if err := c.Target.Validate("target"); err != nil {
 		return err
 	}
-	if c.Source.URI == c.Target.URI && c.Source.Database == c.Target.Database {
+	if c.Source.EndpointKey() == c.Target.EndpointKey() {
 		return errors.New("source and target must not be the same database")
 	}
 	if c.JobID == "" {
@@ -161,11 +165,15 @@ func (c *MongoConnectionConfig) applyDefaults() {
 }
 
 func (c MongoConnectionConfig) Validate(field string) error {
-	if c.URI == "" {
-		return fmt.Errorf("%s.uri is required", field)
+	if _, err := c.resolvedHosts(); err != nil {
+		return fmt.Errorf("%s: %w", field, err)
 	}
 	if c.Database == "" {
 		return fmt.Errorf("%s.database is required", field)
+	}
+
+	if c.Username == "" && c.Password != "" {
+		return fmt.Errorf("%s.password requires %s.username", field, "username")
 	}
 	switch c.Kind {
 	case connectionKindAuto, connectionKindStandalone, connectionKindReplicaSet, connectionKindDocumentDB:
@@ -196,6 +204,47 @@ func (c MongoConnectionConfig) Validate(field string) error {
 	}
 
 	return nil
+}
+
+func (c MongoConnectionConfig) resolvedHosts() ([]string, error) {
+	hosts := make([]string, 0, len(c.Hosts)+1)
+
+	if strings.TrimSpace(c.Host) != "" {
+		hosts = append(hosts, strings.TrimSpace(c.Host))
+	}
+	for _, host := range c.Hosts {
+		h := strings.TrimSpace(host)
+		if h == "" {
+			continue
+		}
+		hosts = append(hosts, h)
+	}
+
+	if len(hosts) == 0 {
+		return nil, errors.New("one of host or hosts is required")
+	}
+
+	for _, host := range hosts {
+		if strings.Contains(host, "://") {
+			return nil, fmt.Errorf("host value %q contains a URI scheme, use host only", host)
+		}
+	}
+
+	return hosts, nil
+}
+
+func (c MongoConnectionConfig) EndpointKey() string {
+	hosts, err := c.resolvedHosts()
+	if err != nil {
+		return ""
+	}
+	normalized := make([]string, len(hosts))
+	for i, host := range hosts {
+		normalized[i] = strings.ToLower(strings.TrimSpace(host))
+	}
+	sort.Strings(normalized)
+
+	return fmt.Sprintf("%s/%s", strings.Join(normalized, ","), c.Database)
 }
 
 func boolPtr(v bool) *bool {

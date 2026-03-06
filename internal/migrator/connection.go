@@ -4,7 +4,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +15,12 @@ import (
 )
 
 func buildClientOptions(cfg MongoConnectionConfig) (*options.ClientOptions, error) {
-	clientOptions := options.Client().ApplyURI(cfg.URI)
+	uri, err := buildConnectionURI(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	clientOptions := options.Client().ApplyURI(uri)
 
 	if cfg.AppName != "" {
 		clientOptions.SetAppName(cfg.AppName)
@@ -67,6 +74,41 @@ func buildClientOptions(cfg MongoConnectionConfig) (*options.ClientOptions, erro
 	}
 
 	return clientOptions, nil
+}
+
+func buildConnectionURI(cfg MongoConnectionConfig) (string, error) {
+	hosts, err := cfg.resolvedHosts()
+	if err != nil {
+		return "", err
+	}
+
+	uri := &url.URL{
+		Scheme: "mongodb",
+		Host:   strings.Join(hosts, ","),
+		Path:   "/" + cfg.Database,
+	}
+
+	if cfg.Username != "" {
+		if cfg.Password != "" {
+			uri.User = url.UserPassword(cfg.Username, cfg.Password)
+		} else {
+			uri.User = url.User(cfg.Username)
+		}
+	}
+
+	query := uri.Query()
+	if cfg.ReplicaSet != "" {
+		query.Set("replicaSet", cfg.ReplicaSet)
+	}
+	if cfg.TLS != nil {
+		query.Set("tls", strconv.FormatBool(*cfg.TLS))
+	}
+
+	if len(query) > 0 {
+		uri.RawQuery = query.Encode()
+	}
+
+	return uri.String(), nil
 }
 
 func buildTLSConfig(cfg MongoConnectionConfig) (*tls.Config, error) {

@@ -37,13 +37,17 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 ```json
 {
   "source": {
-    "uri": "mongodb://source-host-1:27017,source-host-2:27017,source-host-3:27017/?replicaSet=rs0",
+    "hosts": ["source-host-1:27017", "source-host-2:27017", "source-host-3:27017"],
+    "username": "myuser",
+    "password": "mypassword",
     "database": "app",
     "kind": "replica_set",
     "read_preference": "primary"
   },
   "target": {
-    "uri": "mongodb://target-host:27017",
+    "host": "target-host:27017",
+    "username": "myuser",
+    "password": "target-password",
     "database": "app_migrated",
     "kind": "standalone",
     "direct_connection": true
@@ -65,8 +69,12 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 
 ### source/target 연결 필드
 
-- `uri` (필수): MongoDB URI
+- `host` (선택): 단일 호스트/포트 (`host:27017`)
+- `hosts` (선택): 다중 호스트 배열 (`["host1:27017","host2:27017"]`)
+- `host` 또는 `hosts` 중 하나는 필수
 - `database` (필수): DB 이름
+- `username`: 사용자명
+- `password`: 비밀번호
 - `kind`: `auto` | `standalone` | `replica_set` | `documentdb` (기본 `auto`)
 - `replica_set`: replica set 이름 오버라이드
 - `direct_connection`: 단일 노드 직접 연결 여부
@@ -126,4 +134,4 @@ go run . --config ./config.json
 
 - `_id` 기준 정렬/필터가 가능한 컬렉션을 전제로 합니다.
 - 타겟에 같은 `_id`가 이미 있으면 중복키 오류(11000)는 무시하고 계속 진행합니다.
-- 소스와 타겟이 완전히 같은 DB(URI+DB)는 허용하지 않습니다.
+- 소스와 타겟이 완전히 같은 DB(host+database)는 허용하지 않습니다.

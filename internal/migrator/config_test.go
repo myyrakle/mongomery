@@ -11,8 +11,8 @@ func TestLoadConfig_AppliesDefaults(t *testing.T) {
 	t.Parallel()
 
 	cfg := mustLoadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://source:27017","database":"app"},
-		"target": {"uri":"mongodb://target:27017","database":"app_copy"}
+		"source": {"host":"source:27017","database":"app"},
+		"target": {"host":"target:27017","database":"app_copy"}
 	}`)
 
 	if cfg.JobID != "default" {
@@ -39,8 +39,8 @@ func TestLoadConfig_AppliesStandaloneAndReplicaDefaults(t *testing.T) {
 	t.Parallel()
 
 	cfg := mustLoadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://source:27017","database":"app","kind":"standalone"},
-		"target": {"uri":"mongodb://target1:27017,target2:27017","database":"app_copy","kind":"replica_set"}
+		"source": {"host":"source:27017","database":"app","kind":"standalone"},
+		"target": {"hosts":["target1:27017","target2:27017"],"database":"app_copy","kind":"replica_set"}
 	}`)
 
 	if cfg.Source.DirectConnection == nil || !*cfg.Source.DirectConnection {
@@ -55,8 +55,8 @@ func TestLoadConfig_AppliesDocumentDBDefaults(t *testing.T) {
 	t.Parallel()
 
 	cfg := mustLoadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://docdb:27017","database":"app","kind":"documentdb"},
-		"target": {"uri":"mongodb://target:27017","database":"app_copy"}
+		"source": {"host":"docdb-cluster.amazonaws.com:27017","database":"app","kind":"documentdb"},
+		"target": {"host":"target:27017","database":"app_copy"}
 	}`)
 
 	if cfg.Source.TLS == nil || !*cfg.Source.TLS {
@@ -80,8 +80,8 @@ func TestLoadConfig_RejectsUnknownField(t *testing.T) {
 	t.Parallel()
 
 	_, err := loadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://source:27017","database":"app"},
-		"target": {"uri":"mongodb://target:27017","database":"app_copy"},
+		"source": {"host":"source:27017","database":"app"},
+		"target": {"host":"target:27017","database":"app_copy"},
 		"unknown_field": true
 	}`)
 	if err == nil {
@@ -96,8 +96,8 @@ func TestLoadConfig_RejectsInvalidKind(t *testing.T) {
 	t.Parallel()
 
 	_, err := loadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://source:27017","database":"app","kind":"bad"},
-		"target": {"uri":"mongodb://target:27017","database":"app_copy"}
+		"source": {"host":"source:27017","database":"app","kind":"bad"},
+		"target": {"host":"target:27017","database":"app_copy"}
 	}`)
 	if err == nil {
 		t.Fatalf("expected error for invalid source.kind")
@@ -111,8 +111,8 @@ func TestLoadConfig_RejectsSameSourceAndTarget(t *testing.T) {
 	t.Parallel()
 
 	_, err := loadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://same:27017","database":"app"},
-		"target": {"uri":"mongodb://same:27017","database":"app"}
+		"source": {"hosts":["same:27017"],"database":"app"},
+		"target": {"host":"same:27017","database":"app"}
 	}`)
 	if err == nil {
 		t.Fatalf("expected error for same source and target")
@@ -126,14 +126,29 @@ func TestLoadConfig_RejectsMultipleJSONDocuments(t *testing.T) {
 	t.Parallel()
 
 	_, err := loadConfigFromJSON(t, `{
-		"source": {"uri":"mongodb://source:27017","database":"app"},
-		"target": {"uri":"mongodb://target:27017","database":"app_copy"}
+		"source": {"host":"source:27017","database":"app"},
+		"target": {"host":"target:27017","database":"app_copy"}
 	}{"x":1}`)
 	if err == nil {
 		t.Fatalf("expected error for multiple json documents")
 	}
 	if !strings.Contains(err.Error(), "exactly one JSON object") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfig_RejectsHostWithUriLikeFormat(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {"host":"mongodb://source:27017","database":"app"},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for host containing uri scheme")
+	}
+	if !strings.Contains(err.Error(), "host value") {
+		t.Fatalf("expected host scheme error, got: %v", err)
 	}
 }
 

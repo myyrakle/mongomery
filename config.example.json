@@ -1,12 +1,16 @@
 {
   "source": {
-    "uri": "mongodb://source-host-1:27017,source-host-2:27017,source-host-3:27017/?replicaSet=rs0",
+    "hosts": ["source-host-1:27017", "source-host-2:27017", "source-host-3:27017"],
+    "username": "myuser",
+    "password": "mypassword",
     "database": "app",
     "kind": "replica_set",
     "read_preference": "primary"
   },
   "target": {
-    "uri": "mongodb://target-host:27017",
+    "host": "target-host:27017",
+    "username": "myuser",
+    "password": "target-password",
     "database": "app_migrated",
     "kind": "standalone",
     "direct_connection": true

@@ -1,6 +1,7 @@
 package migrator
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,5 +63,52 @@ func TestBuildTLSConfig_InvalidCAFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected tls config build to fail for invalid pem")
+	}
+}
+
+func TestBuildConnectionURI_WithCredentialsAndHosts(t *testing.T) {
+	t.Parallel()
+
+	cfg := MongoConnectionConfig{
+		Host:     "mongo-primary:27017",
+		Hosts:    []string{"mongo-secondary:27017"},
+		Username: "admin",
+		Password: "p@ss",
+		Database: "appdb",
+		TLS:      boolPtr(true),
+	}
+	uri, err := buildConnectionURI(cfg)
+	if err != nil {
+		t.Fatalf("buildConnectionURI failed: %v", err)
+	}
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		t.Fatalf("parse generated uri %q: %v", uri, err)
+	}
+	if parsed.Scheme != "mongodb" {
+		t.Fatalf("expected scheme mongodb, got %q", parsed.Scheme)
+	}
+	if parsed.Host != "mongo-primary:27017,mongo-secondary:27017" {
+		t.Fatalf("unexpected host string %q", parsed.Host)
+	}
+	if parsed.Path != "/appdb" {
+		t.Fatalf("unexpected path %q", parsed.Path)
+	}
+	username := parsed.User.Username()
+	password, _ := parsed.User.Password()
+	if username != "admin" || password != "p@ss" {
+		t.Fatalf("unexpected credentials: %q / %q", username, password)
+	}
+	if parsed.Query().Get("tls") != "true" {
+		t.Fatalf("expected tls=true, got %q", parsed.Query().Get("tls"))
+	}
+}
+
+func TestBuildConnectionURI_RejectsMissingHost(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildConnectionURI(MongoConnectionConfig{Database: "app"})
+	if err == nil {
+		t.Fatalf("expected buildConnectionURI to fail with missing host")
 	}
 }
