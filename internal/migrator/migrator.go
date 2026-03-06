@@ -131,12 +131,66 @@ func (m *Migrator) Close(ctx context.Context) error {
 }
 
 func (m *Migrator) Run(ctx context.Context) error {
-	defer func() {
-		if err := m.Close(context.Background()); err != nil {
-			log.Printf("failed to disconnect mongo clients: %v", err)
-		}
-	}()
+	if err := m.VerifyConnections(ctx); err != nil {
+		return err
+	}
 
+	if err := m.ReplicateSchema(ctx); err != nil {
+		return err
+	}
+
+	if err := m.CopyData(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Migrator) VerifyConnections(ctx context.Context) error {
+	sourceVersion, err := m.fetchServerVersion(ctx, m.sourceDB)
+	if err != nil {
+		return fmt.Errorf("verify source connection: %w", err)
+	}
+	targetVersion, err := m.fetchServerVersion(ctx, m.targetDB)
+	if err != nil {
+		return fmt.Errorf("verify target connection: %w", err)
+	}
+
+	log.Printf("verify source db=%s version=%s connected", m.cfg.Source.Database, sourceVersion)
+	log.Printf("verify target db=%s version=%s connected", m.cfg.Target.Database, targetVersion)
+	return nil
+}
+
+func (m *Migrator) ReplicateSchema(ctx context.Context) error {
+	collections, err := m.discoverCollections(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(collections) == 0 {
+		log.Printf("schema phase: no user collections found in source db=%s", m.cfg.Source.Database)
+		return nil
+	}
+
+	log.Printf("phase=schema_init total=%d", len(collections))
+	for _, coll := range collections {
+		if err := m.ensureTargetCollection(ctx, coll); err != nil {
+			return err
+		}
+	}
+
+	log.Printf("phase=schema_indexes total=%d", len(collections))
+	for _, coll := range collections {
+		if err := m.cloneIndexesFromSource(ctx, coll.Name); err != nil {
+			return err
+		}
+	}
+
+	log.Printf("schema phase complete db=%s", m.cfg.Source.Database)
+	return nil
+}
+
+func (m *Migrator) CopyData(ctx context.Context) error {
 	if err := m.ensureMetaIndexes(ctx); err != nil {
 		return err
 	}
@@ -147,8 +201,12 @@ func (m *Migrator) Run(ctx context.Context) error {
 	}
 
 	if len(collections) == 0 {
-		log.Printf("no collections found in source db=%s", m.cfg.Source.Database)
+		log.Printf("copy phase: no user collections found in source db=%s", m.cfg.Source.Database)
 		return nil
+	}
+
+	if err := m.validateTargetCollectionsExist(ctx, collections); err != nil {
+		return err
 	}
 
 	if err := m.upsertJob(ctx, len(collections), jobStatusRunning); err != nil {
@@ -159,21 +217,7 @@ func (m *Migrator) Run(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("phase=initialize_collections total=%d", len(collections))
-	for _, coll := range collections {
-		if err := m.initializeCollection(ctx, coll); err != nil {
-			return err
-		}
-	}
-
-	log.Printf("phase=clone_indexes total=%d", len(collections))
-	for _, coll := range collections {
-		if err := m.cloneIndexes(ctx, coll.Name); err != nil {
-			return err
-		}
-	}
-
-	log.Printf("phase=copy_documents total=%d", len(collections))
+	log.Printf("phase=copy_data total=%d", len(collections))
 	for _, coll := range collections {
 		if err := m.copyCollection(ctx, coll.Name); err != nil {
 			return err
@@ -187,7 +231,7 @@ func (m *Migrator) Run(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("migration complete job_id=%s source=%s target=%s", m.cfg.JobID, m.cfg.Source.Database, m.cfg.Target.Database)
+	log.Printf("copy phase complete job_id=%s source=%s target=%s", m.cfg.JobID, m.cfg.Source.Database, m.cfg.Target.Database)
 	return nil
 }
 
@@ -328,15 +372,7 @@ func (m *Migrator) seedCollectionProgress(ctx context.Context, collections []col
 	return nil
 }
 
-func (m *Migrator) initializeCollection(ctx context.Context, coll collectionInfo) error {
-	progress, err := m.getCollectionProgress(ctx, coll.Name)
-	if err != nil {
-		return err
-	}
-	if progress.Initialized {
-		return nil
-	}
-
+func (m *Migrator) ensureTargetCollection(ctx context.Context, coll collectionInfo) error {
 	names, err := m.targetDB.ListCollectionNames(ctx, bson.M{"name": coll.Name})
 	if err != nil {
 		return fmt.Errorf("check target collection %s: %w", coll.Name, err)
@@ -354,25 +390,10 @@ func (m *Migrator) initializeCollection(ctx context.Context, coll collectionInfo
 		}
 	}
 
-	_, err = m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
-		"initialized": true,
-		"updated_at":  time.Now().UTC(),
-	}})
-	if err != nil {
-		return fmt.Errorf("mark initialized for %s: %w", coll.Name, err)
-	}
 	return nil
 }
 
-func (m *Migrator) cloneIndexes(ctx context.Context, collection string) error {
-	progress, err := m.getCollectionProgress(ctx, collection)
-	if err != nil {
-		return err
-	}
-	if progress.IndexesCloned {
-		return nil
-	}
-
+func (m *Migrator) cloneIndexesFromSource(ctx context.Context, collection string) error {
 	cur, err := m.sourceDB.Collection(collection).Indexes().List(ctx)
 	if err != nil {
 		return fmt.Errorf("list indexes for %s: %w", collection, err)
@@ -397,24 +418,48 @@ func (m *Migrator) cloneIndexes(ctx context.Context, collection string) error {
 		return fmt.Errorf("iterate indexes for %s: %w", collection, err)
 	}
 
-	if len(indexes) > 0 {
-		cmd := bson.D{
-			{Key: "createIndexes", Value: collection},
-			{Key: "indexes", Value: indexes},
-		}
-		if err := m.targetDB.RunCommand(ctx, cmd).Err(); err != nil {
-			return fmt.Errorf("create indexes for %s: %w", collection, err)
-		}
+	if len(indexes) == 0 {
+		log.Printf("schema=collection=%s indexes=0 (skip)", collection)
+		return nil
 	}
 
-	_, err = m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
-		"indexes_cloned": true,
-		"updated_at":     time.Now().UTC(),
-	}})
-	if err != nil {
-		return fmt.Errorf("mark indexes cloned for %s: %w", collection, err)
+	cmd := bson.D{
+		{Key: "createIndexes", Value: collection},
+		{Key: "indexes", Value: indexes},
 	}
+	if err := m.targetDB.RunCommand(ctx, cmd).Err(); err != nil {
+		if isIgnorableCreateIndexError(err) {
+			log.Printf("schema=collection=%s indexes_already_synced=true", collection)
+			return nil
+		}
+		return fmt.Errorf("create indexes for %s: %w", collection, err)
+	}
+
 	return nil
+}
+
+func (m *Migrator) validateTargetCollectionsExist(ctx context.Context, collections []collectionInfo) error {
+	names, err := m.targetDB.ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		return fmt.Errorf("list target collections: %w", err)
+	}
+
+	existing := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		existing[name] = struct{}{}
+	}
+
+	missing := make([]string, 0, len(collections))
+	for _, coll := range collections {
+		if _, ok := existing[coll.Name]; !ok {
+			missing = append(missing, coll.Name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("target missing schema for collections: %v; run `schema` first", missing)
 }
 
 func (m *Migrator) copyCollection(ctx context.Context, collection string) error {
@@ -551,7 +596,7 @@ func (m *Migrator) getCollectionProgress(ctx context.Context, collection string)
 	var progress CollectionProgress
 	if err := m.progressColl.FindOne(ctx, bson.M{"_id": id}).Decode(&progress); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return CollectionProgress{}, fmt.Errorf("progress not initialized for collection %s", collection)
+			return CollectionProgress{}, fmt.Errorf("progress not initialized for collection %s (run `copy` after `schema` or rerun to seed again)", collection)
 		}
 		return CollectionProgress{}, fmt.Errorf("load progress for collection %s: %w", collection, err)
 	}
@@ -573,6 +618,17 @@ func (m *Migrator) updateCompletedCount(ctx context.Context) error {
 	return nil
 }
 
+func (m *Migrator) fetchServerVersion(ctx context.Context, db *mongo.Database) (string, error) {
+	var info struct {
+		Version string `bson:"version"`
+	}
+
+	if err := db.RunCommand(ctx, bson.D{{Key: "buildInfo", Value: 1}}).Decode(&info); err != nil {
+		return "", err
+	}
+	return info.Version, nil
+}
+
 func collectionProgressID(jobID, collection string) string {
 	return jobID + "::" + collection
 }
@@ -581,6 +637,15 @@ func isNamespaceExistsError(err error) bool {
 	var cmdErr mongo.CommandError
 	if errors.As(err, &cmdErr) {
 		return cmdErr.Code == 48
+	}
+	return false
+}
+
+func isIgnorableCreateIndexError(err error) bool {
+	var cmdErr mongo.CommandError
+	if errors.As(err, &cmdErr) {
+		// index already exists or equivalent existing index definitions.
+		return cmdErr.Code == 85 || cmdErr.Code == 86 || cmdErr.Code == 11000
 	}
 	return false
 }

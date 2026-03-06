@@ -2,20 +2,40 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/myyrakle/mongomery/internal/migrator"
 )
 
+type cliMode string
+
+const (
+	cliModeVerify cliMode = "verify"
+	cliModeSchema cliMode = "schema"
+	cliModeCopy   cliMode = "copy"
+	cliModeRun    cliMode = "run"
+	cliModeAll    cliMode = "all"
+)
+
 func main() {
 	var configPath string
+	var command string
 	flag.StringVar(&configPath, "config", "", "Path to JSON config file")
+	flag.StringVar(&command, "command", "", "명령 모드: verify | schema | copy | run | all")
 	flag.Parse()
+
+	mode, err := resolveMode(command, flag.Args())
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	if configPath == "" {
 		log.Fatal("config is required")
@@ -33,8 +53,70 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() {
+		if err := m.Close(context.Background()); err != nil {
+			log.Printf("failed to disconnect mongo clients: %v", err)
+		}
+	}()
 
-	if err := m.Run(ctx); err != nil {
-		log.Fatal(err)
+	switch mode {
+	case cliModeVerify:
+		if err := m.VerifyConnections(ctx); err != nil {
+			log.Fatal(err)
+		}
+	case cliModeSchema:
+		if err := m.ReplicateSchema(ctx); err != nil {
+			log.Fatal(err)
+		}
+	case cliModeCopy:
+		if err := m.CopyData(ctx); err != nil {
+			log.Fatal(err)
+		}
+	case cliModeRun:
+		fallthrough
+	case cliModeAll:
+		if err := m.Run(ctx); err != nil {
+			log.Fatal(err)
+		}
+	default:
+		log.Fatalf("unknown mode: %s", mode)
+	}
+}
+
+func resolveMode(flagCommand string, args []string) (cliMode, error) {
+	normalizedFlagCommand := strings.ToLower(strings.TrimSpace(flagCommand))
+	var positionalMode string
+
+	if len(args) > 1 {
+		return "", fmt.Errorf("too many positional arguments, expected only command")
+	}
+	if len(args) == 1 {
+		positionalMode = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+
+	if normalizedFlagCommand != "" && positionalMode != "" && normalizedFlagCommand != positionalMode {
+		return "", fmt.Errorf("conflicting command values: -command=%s and positional=%s", normalizedFlagCommand, positionalMode)
+	}
+
+	mode := normalizedFlagCommand
+	if mode == "" {
+		mode = positionalMode
+	}
+	if mode == "" {
+		// keep backward compatibility with previous behavior: run full flow
+		return cliModeRun, nil
+	}
+	if err := validateMode(mode); err != nil {
+		return "", err
+	}
+	return cliMode(mode), nil
+}
+
+func validateMode(mode string) error {
+	switch cliMode(mode) {
+	case cliModeVerify, cliModeSchema, cliModeCopy, cliModeRun, cliModeAll:
+		return nil
+	default:
+		return errors.New("invalid mode: verify | schema | copy | run | all")
 	}
 }
