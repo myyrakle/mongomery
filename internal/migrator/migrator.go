@@ -38,7 +38,6 @@ type Migrator struct {
 type collectionInfo struct {
 	Name    string
 	Options bson.M
-	Count   int64
 }
 
 type CollectionProgress struct {
@@ -287,15 +286,9 @@ func (m *Migrator) discoverCollections(ctx context.Context) ([]collectionInfo, e
 		}
 
 		opts, _ := raw["options"].(bson.M)
-		count, err := m.sourceDB.Collection(name).CountDocuments(ctx, bson.D{})
-		if err != nil {
-			return nil, fmt.Errorf("count documents for %s: %w", name, err)
-		}
-
 		collections = append(collections, collectionInfo{
 			Name:    name,
 			Options: opts,
-			Count:   count,
 		})
 	}
 
@@ -308,7 +301,7 @@ func (m *Migrator) discoverCollections(ctx context.Context) ([]collectionInfo, e
 	})
 
 	for _, c := range collections {
-		log.Printf("discovered collection=%s total_docs=%d", c.Name, c.Count)
+		log.Printf("discovered collection=%s", c.Name)
 	}
 
 	return collections, nil
@@ -343,15 +336,19 @@ func (m *Migrator) upsertJob(ctx context.Context, totalCollections int, status s
 func (m *Migrator) seedCollectionProgress(ctx context.Context, collections []collectionInfo) error {
 	now := time.Now().UTC()
 	for _, coll := range collections {
+		count, err := m.sourceDB.Collection(coll.Name).CountDocuments(ctx, bson.D{})
+		if err != nil {
+			return fmt.Errorf("count documents for %s: %w", coll.Name, err)
+		}
 		id := collectionProgressID(m.cfg.JobID, coll.Name)
-		_, err := m.progressColl.UpdateOne(
+		_, err = m.progressColl.UpdateOne(
 			ctx,
 			bson.M{"_id": id},
 			bson.M{
 				"$set": bson.M{
 					"job_id":     m.cfg.JobID,
 					"collection": coll.Name,
-					"total_docs": coll.Count,
+					"total_docs": count,
 					"updated_at": now,
 				},
 				"$setOnInsert": bson.M{
