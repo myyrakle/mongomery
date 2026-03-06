@@ -31,8 +31,8 @@ type Migrator struct {
 	targetDB       *mongo.Database
 	jobsColl       *mongo.Collection
 	progressColl   *mongo.Collection
-	jobsCollName   string
-	progressCollID string
+	jobsCollName      string
+	progressCollName  string
 }
 
 type collectionInfo struct {
@@ -55,37 +55,39 @@ type CollectionProgress struct {
 }
 
 func New(cfg Config) (*Migrator, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
 	sourceOpts, err := buildClientOptions(cfg.Source)
 	if err != nil {
 		return nil, fmt.Errorf("build source mongo client options: %w", err)
 	}
 
-	sourceClient, err := mongo.Connect(ctx, sourceOpts)
+	targetOpts, err := buildClientOptions(cfg.Target)
+	if err != nil {
+		return nil, fmt.Errorf("build target mongo client options: %w", err)
+	}
+
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer connectCancel()
+
+	sourceClient, err := mongo.Connect(connectCtx, sourceOpts)
 	if err != nil {
 		return nil, fmt.Errorf("connect source mongo: %w", err)
 	}
 
-	targetOpts, err := buildClientOptions(cfg.Target)
-	if err != nil {
-		_ = sourceClient.Disconnect(context.Background())
-		return nil, fmt.Errorf("build target mongo client options: %w", err)
-	}
-
-	targetClient, err := mongo.Connect(ctx, targetOpts)
+	targetClient, err := mongo.Connect(connectCtx, targetOpts)
 	if err != nil {
 		_ = sourceClient.Disconnect(context.Background())
 		return nil, fmt.Errorf("connect target mongo: %w", err)
 	}
 
-	if err := sourceClient.Ping(ctx, nil); err != nil {
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer pingCancel()
+
+	if err := sourceClient.Ping(pingCtx, nil); err != nil {
 		_ = sourceClient.Disconnect(context.Background())
 		_ = targetClient.Disconnect(context.Background())
 		return nil, fmt.Errorf("ping source mongo: %w", err)
 	}
-	if err := targetClient.Ping(ctx, nil); err != nil {
+	if err := targetClient.Ping(pingCtx, nil); err != nil {
 		_ = sourceClient.Disconnect(context.Background())
 		_ = targetClient.Disconnect(context.Background())
 		return nil, fmt.Errorf("ping target mongo: %w", err)
@@ -102,8 +104,8 @@ func New(cfg Config) (*Migrator, error) {
 		targetDB:       targetClient.Database(cfg.Target.Database),
 		jobsColl:       targetClient.Database(cfg.Target.Database).Collection(jobsName),
 		progressColl:   targetClient.Database(cfg.Target.Database).Collection(progressName),
-		jobsCollName:   jobsName,
-		progressCollID: progressName,
+		jobsCollName:     jobsName,
+		progressCollName: progressName,
 	}
 
 	return m, nil
@@ -259,11 +261,6 @@ func (m *Migrator) discoverCollections(ctx context.Context) ([]collectionInfo, e
 	}
 	defer cur.Close(ctx)
 
-	metaNames := map[string]struct{}{
-		m.jobsCollName:   {},
-		m.progressCollID: {},
-	}
-
 	skipNames := make(map[string]struct{}, len(m.cfg.Source.SkipCollections))
 	for _, name := range m.cfg.Source.SkipCollections {
 		skipNames[name] = struct{}{}
@@ -282,9 +279,6 @@ func (m *Migrator) discoverCollections(ctx context.Context) ([]collectionInfo, e
 			continue
 		}
 		if strings.HasPrefix(name, "system.") {
-			continue
-		}
-		if _, ok := metaNames[name]; ok {
 			continue
 		}
 		if _, ok := skipNames[name]; ok {

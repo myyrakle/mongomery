@@ -231,6 +231,9 @@ func (c MongoConnectionConfig) Validate(field string) error {
 	if c.TLS != nil && !*c.TLS && (c.TLSCAFile != "" || c.TLSInsecureSkipVerify) {
 		return fmt.Errorf("%s.tls cannot be false when tls_ca_file or tls_insecure_skip_verify is set", field)
 	}
+	if field == "target" && len(c.SkipCollections) > 0 {
+		return fmt.Errorf("target.skip_collections is not supported; use source.skip_collections instead")
+	}
 
 	return nil
 }
