@@ -7,8 +7,8 @@ func TestResolveMode_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveMode returned error: %v", err)
 	}
-	if mode != cliModeRun {
-		t.Fatalf("expected default mode %s, got %s", cliModeRun, mode)
+	if mode != cliModeFull {
+		t.Fatalf("expected default full flow mode, got %s", mode)
 	}
 }
 

@@ -21,15 +21,14 @@ const (
 	cliModeVerify cliMode = "verify"
 	cliModeSchema cliMode = "schema"
 	cliModeCopy   cliMode = "copy"
-	cliModeRun    cliMode = "run"
-	cliModeAll    cliMode = "all"
+	cliModeFull   cliMode = ""
 )
 
 func main() {
 	var configPath string
 	var command string
 	flag.StringVar(&configPath, "config", "", "Path to JSON config file")
-	flag.StringVar(&command, "command", "", "명령 모드: verify | schema | copy | run | all")
+	flag.StringVar(&command, "command", "", "명령 모드: verify | schema | copy")
 	flag.Parse()
 
 	mode, err := resolveMode(command, flag.Args())
@@ -72,9 +71,7 @@ func main() {
 		if err := m.CopyData(ctx); err != nil {
 			log.Fatal(err)
 		}
-	case cliModeRun:
-		fallthrough
-	case cliModeAll:
+	case cliModeFull:
 		if err := m.Run(ctx); err != nil {
 			log.Fatal(err)
 		}
@@ -103,8 +100,8 @@ func resolveMode(flagCommand string, args []string) (cliMode, error) {
 		mode = positionalMode
 	}
 	if mode == "" {
-		// keep backward compatibility with previous behavior: run full flow
-		return cliModeRun, nil
+		// no mode defaults to full flow: verify -> schema -> copy
+		return cliModeFull, nil
 	}
 	if err := validateMode(mode); err != nil {
 		return "", err
@@ -114,9 +111,9 @@ func resolveMode(flagCommand string, args []string) (cliMode, error) {
 
 func validateMode(mode string) error {
 	switch cliMode(mode) {
-	case cliModeVerify, cliModeSchema, cliModeCopy, cliModeRun, cliModeAll:
+	case cliModeVerify, cliModeSchema, cliModeCopy:
 		return nil
 	default:
-		return errors.New("invalid mode: verify | schema | copy | run | all")
+		return errors.New("invalid mode: verify | schema | copy")
 	}
 }
