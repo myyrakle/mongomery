@@ -41,7 +41,8 @@ type MongoConnectionConfig struct {
 	RetryWrites              *bool  `json:"retry_writes"`
 	ReadPreference           string `json:"read_preference"`
 	AppName                  string `json:"app_name"`
-	AuthSource               string `json:"auth_source"`
+	AuthSource               string   `json:"auth_source"`
+	SkipCollections          []string `json:"skip_collections"`
 	TLS                      *bool  `json:"tls"`
 	TLSCAFile                string `json:"tls_ca_file"`
 	TLSInsecureSkipVerify    bool   `json:"tls_insecure_skip_verify"`

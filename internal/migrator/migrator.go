@@ -266,6 +266,11 @@ func (m *Migrator) discoverCollections(ctx context.Context) ([]collectionInfo, e
 		m.progressCollID: {},
 	}
 
+	skipNames := make(map[string]struct{}, len(m.cfg.Source.SkipCollections))
+	for _, name := range m.cfg.Source.SkipCollections {
+		skipNames[name] = struct{}{}
+	}
+
 	collections := make([]collectionInfo, 0)
 	for cur.Next(ctx) {
 		var raw bson.M
@@ -282,6 +287,9 @@ func (m *Migrator) discoverCollections(ctx context.Context) ([]collectionInfo, e
 			continue
 		}
 		if _, ok := metaNames[name]; ok {
+			continue
+		}
+		if _, ok := skipNames[name]; ok {
 			continue
 		}
 
