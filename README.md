@@ -80,6 +80,12 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 - `connect_timeout_ms`, `server_selection_timeout_ms`, `socket_timeout_ms`
 - `max_pool_size`, `min_pool_size`
 
+`kind`별 자동 기본값(명시값 우선):
+
+- `standalone`: `direct_connection=true`
+- `replica_set`: `direct_connection=false`
+- `documentdb`: `direct_connection=false`, `tls=true`, `retry_writes=false`, `replica_set=rs0`, `read_preference=secondaryPreferred`
+
 ### DocumentDB 기본값
 
 `kind: "documentdb"`를 지정하면 아래 기본값이 자동 적용됩니다(명시값 우선).

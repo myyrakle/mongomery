@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 const (
@@ -126,11 +127,24 @@ func (c Config) Validate() error {
 }
 
 func (c *MongoConnectionConfig) applyDefaults() {
+	c.Kind = strings.ToLower(strings.TrimSpace(c.Kind))
 	if c.Kind == "" {
 		c.Kind = connectionKindAuto
 	}
 
-	if c.Kind == connectionKindDocumentDB {
+	switch c.Kind {
+	case connectionKindStandalone:
+		if c.DirectConnection == nil {
+			c.DirectConnection = boolPtr(true)
+		}
+	case connectionKindReplicaSet:
+		if c.DirectConnection == nil {
+			c.DirectConnection = boolPtr(false)
+		}
+	case connectionKindDocumentDB:
+		if c.DirectConnection == nil {
+			c.DirectConnection = boolPtr(false)
+		}
 		if c.TLS == nil {
 			c.TLS = boolPtr(true)
 		}
