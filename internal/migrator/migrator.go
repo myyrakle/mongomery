@@ -195,6 +195,8 @@ func (m *Migrator) ReplicateSchema(ctx context.Context) error {
 }
 
 func (m *Migrator) CopyData(ctx context.Context) error {
+	phaseStart := time.Now()
+
 	if err := m.ensureMetaIndexes(ctx); err != nil {
 		return err
 	}
@@ -235,7 +237,13 @@ func (m *Migrator) CopyData(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("copy phase complete job_id=%s source=%s target=%s", m.cfg.JobID, m.cfg.Source.Database, m.cfg.Target.Database)
+	log.Printf(
+		"copy phase complete job_id=%s source=%s target=%s elapsed=%s",
+		m.cfg.JobID,
+		m.cfg.Source.Database,
+		m.cfg.Target.Database,
+		formatElapsed(time.Since(phaseStart)),
+	)
 	return nil
 }
 
@@ -467,6 +475,7 @@ func (m *Migrator) validateTargetCollectionsExist(ctx context.Context, collectio
 }
 
 func (m *Migrator) copyCollection(ctx context.Context, collection string) error {
+	collectionStart := time.Now()
 	defer m.finishLiveProgressLine(collection)
 
 	progress, err := m.getCollectionProgress(ctx, collection)
@@ -517,6 +526,13 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 			if !m.liveProgressTTY {
 				log.Printf("collection=%s progress=100%% (%d/%d)", collection, progress.CopiedDocs, progress.TotalDocs)
 			}
+			log.Printf(
+				"collection=%s copy_done copied_docs=%d total_docs=%d elapsed=%s",
+				collection,
+				progress.CopiedDocs,
+				progress.TotalDocs,
+				formatElapsed(time.Since(collectionStart)),
+			)
 			return nil
 		}
 
@@ -752,4 +768,8 @@ func isTTY(file *os.File) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func formatElapsed(d time.Duration) time.Duration {
+	return d.Round(time.Millisecond)
 }
