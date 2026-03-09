@@ -679,7 +679,31 @@ func isIgnorableCreateIndexError(err error) bool {
 	var cmdErr mongo.CommandError
 	if errors.As(err, &cmdErr) {
 		// index already exists or equivalent existing index definitions.
-		return cmdErr.Code == 85 || cmdErr.Code == 86 || cmdErr.Code == 11000
+		if cmdErr.Code == 85 || cmdErr.Code == 86 || cmdErr.Code == 11000 {
+			return true
+		}
+	}
+	var writeErr mongo.WriteException
+	if errors.As(err, &writeErr) {
+		if writeErr.WriteConcernError == nil && len(writeErr.WriteErrors) > 0 {
+			onlyDuplicateLike := true
+			for _, w := range writeErr.WriteErrors {
+				if w.Code != 85 && w.Code != 86 && w.Code != 11000 {
+					onlyDuplicateLike = false
+					break
+				}
+			}
+			if onlyDuplicateLike {
+				return true
+			}
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "index already requested with different name") {
+		return true
+	}
+	if strings.Contains(msg, "equivalent index already exists with a different name") {
+		return true
 	}
 	return false
 }
