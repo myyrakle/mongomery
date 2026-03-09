@@ -435,28 +435,11 @@ func (m *Migrator) cloneIndexesFromSource(ctx context.Context, collection string
 		return nil
 	}
 
-	cmd := bson.D{
-		{Key: "createIndexes", Value: collection},
-		{Key: "indexes", Value: indexes},
+	createdCount, skippedCount, err := m.createIndexesIndividually(ctx, collection, indexes)
+	if err != nil {
+		return err
 	}
-	if err := m.targetDB.RunCommand(ctx, cmd).Err(); err != nil {
-		if isIgnorableCreateIndexError(err) {
-			log.Printf("schema=collection=%s indexes_already_synced=true", collection)
-			return nil
-		}
-		if isUnsupportedCreateIndexError(err) {
-			log.Printf("schema=collection=%s indexes_batch_unsupported=true fallback=single", collection)
-			createdCount, skippedCount, fallbackErr := m.createIndexesIndividually(ctx, collection, indexes)
-			if fallbackErr != nil {
-				return fallbackErr
-			}
-			log.Printf("schema=collection=%s indexes_created=%d indexes_skipped=%d mode=single", collection, createdCount, skippedCount)
-			return nil
-		}
-		return fmt.Errorf("create indexes for %s: %w", collection, err)
-	}
-
-	log.Printf("schema=collection=%s indexes=%d created", collection, len(indexes))
+	log.Printf("schema=collection=%s indexes_total=%d indexes_created=%d indexes_skipped=%d mode=single", collection, len(indexes), createdCount, skippedCount)
 	return nil
 }
 
@@ -759,7 +742,7 @@ func isIgnorableCreateIndexError(err error) bool {
 		}
 	}
 	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "index already requested with different name") {
+	if strings.Contains(msg, "existing index has the same name as requested index") {
 		return true
 	}
 	if strings.Contains(msg, "equivalent index already exists with a different name") {
@@ -886,26 +869,29 @@ func (m *Migrator) createIndexesIndividually(ctx context.Context, collection str
 	createdCount := 0
 	skippedCount := 0
 
-	for _, index := range indexes {
+	for i, index := range indexes {
+		indexName := "<unknown>"
+		if doc, ok := index.(bson.M); ok {
+			if n, ok := doc["name"].(string); ok && n != "" {
+				indexName = n
+			}
+		}
+
 		cmd := bson.D{
 			{Key: "createIndexes", Value: collection},
 			{Key: "indexes", Value: []interface{}{index}},
 		}
+
 		if err := m.targetDB.RunCommand(ctx, cmd).Err(); err != nil {
 			if isIgnorableCreateIndexError(err) {
 				skippedCount++
 				continue
 			}
 			if isUnsupportedCreateIndexError(err) {
-				indexName := "<unknown>"
-				if doc, ok := index.(bson.M); ok {
-					if n, ok := doc["name"].(string); ok && n != "" {
-						indexName = n
-					}
-				}
 				log.Printf(
-					"schema=collection=%s index=%s skipped reason=unsupported_feature detail=%q",
+					"schema=collection=%s index=%d name=%s result=skipped reason=unsupported_feature detail=%q",
 					collection,
+					i,
 					indexName,
 					err.Error(),
 				)
@@ -915,6 +901,7 @@ func (m *Migrator) createIndexesIndividually(ctx context.Context, collection str
 			return createdCount, skippedCount, fmt.Errorf("create index for %s: %w", collection, err)
 		}
 		createdCount++
+		log.Printf("schema=collection=%s index=%d name=%s result=created", collection, i, indexName)
 	}
 
 	return createdCount, skippedCount, nil
@@ -976,29 +963,9 @@ func sanitizeIndexCollation(idx bson.M) {
 		return
 	}
 
+
 	switch c := rawCollation.(type) {
 	case bson.M:
 		delete(c, "version")
-		if len(c) == 0 {
-			delete(idx, "collation")
-		}
-	case map[string]interface{}:
-		delete(c, "version")
-		if len(c) == 0 {
-			delete(idx, "collation")
-		}
-	case bson.D:
-		filtered := make(bson.D, 0, len(c))
-		for _, e := range c {
-			if e.Key == "version" {
-				continue
-			}
-			filtered = append(filtered, e)
-		}
-		if len(filtered) == 0 {
-			delete(idx, "collation")
-			return
-		}
-		idx["collation"] = filtered
 	}
 }

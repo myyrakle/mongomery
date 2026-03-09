@@ -36,3 +36,5 @@ go.work.sum
 real.*.json
 
 *.pem
+
+*.js
