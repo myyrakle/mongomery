@@ -58,6 +58,11 @@ type CollectionProgress struct {
 	CompletedAt       time.Time   `bson:"completed_at,omitempty"`
 }
 
+type copyBatch struct {
+	Docs        []bson.M
+	ReadElapsed time.Duration
+}
+
 func New(cfg Config) (*Migrator, error) {
 	sourceOpts, err := buildClientOptions(cfg.Source)
 	if err != nil {
@@ -488,59 +493,58 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 
 	sourceColl := m.sourceDB.Collection(collection)
 	targetColl := m.targetDB.Collection(collection)
+	batchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	for {
-		filter := bson.D{}
-		if progress.LastID != nil {
-			filter = bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: progress.LastID}}}}
-		}
+	batchCh := make(chan copyBatch, 2)
+	readErrCh := make(chan error, 1)
 
-		opts := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}).SetLimit(int64(m.cfg.BatchSize))
-		readStart := time.Now()
-		cur, err := sourceColl.Find(ctx, filter, opts)
-		if err != nil {
-			return fmt.Errorf("find batch collection=%s: %w", collection, err)
-		}
+	go func(lastID interface{}) {
+		defer close(batchCh)
+		defer close(readErrCh)
 
-		docs := make([]bson.M, 0, m.cfg.BatchSize)
-		if err := cur.All(ctx, &docs); err != nil {
-			_ = cur.Close(ctx)
-			return fmt.Errorf("decode batch collection=%s: %w", collection, err)
-		}
-		_ = cur.Close(ctx)
-		totalReadElapsed += time.Since(readStart)
+		for {
+			filter := bson.D{}
+			if lastID != nil {
+				filter = bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: lastID}}}}
+			}
 
-		if len(docs) == 0 {
-			checkpointStart := time.Now()
-			now := time.Now().UTC()
-			_, err := m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
-				"status":       collectionStatusDone,
-				"updated_at":   now,
-				"completed_at": now,
-			}})
+			opts := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}).SetLimit(int64(m.cfg.BatchSize))
+			readStart := time.Now()
+			cur, err := sourceColl.Find(batchCtx, filter, opts)
 			if err != nil {
-				return fmt.Errorf("mark collection done %s: %w", collection, err)
+				readErrCh <- fmt.Errorf("find batch collection=%s: %w", collection, err)
+				return
 			}
-			totalCheckpointElapsed += time.Since(checkpointStart)
-			m.renderLiveProgressLine(progress.Collection, 100, progress.CopiedDocs, progress.TotalDocs)
-			m.finishLiveProgressLine(collection)
-			if !m.liveProgressTTY {
-				log.Printf("collection=%s progress=100%% (%d/%d)", collection, progress.CopiedDocs, progress.TotalDocs)
-			}
-			log.Printf(
-				"collection=%s copy_done copied_docs=%d total_docs=%d elapsed=%s",
-				collection,
-				progress.CopiedDocs,
-				progress.TotalDocs,
-				formatElapsed(time.Since(collectionStart)),
-			)
-			logCopyTimingSummary(collection, batchCount, progress.CopiedDocs, totalReadElapsed, totalWriteElapsed, totalCheckpointElapsed)
-			return nil
-		}
-		batchCount++
 
-		insertDocs := make([]interface{}, 0, len(docs))
-		for _, doc := range docs {
+			docs := make([]bson.M, 0, m.cfg.BatchSize)
+			if err := cur.All(batchCtx, &docs); err != nil {
+				_ = cur.Close(batchCtx)
+				readErrCh <- fmt.Errorf("decode batch collection=%s: %w", collection, err)
+				return
+			}
+			_ = cur.Close(batchCtx)
+
+			if len(docs) == 0 {
+				return
+			}
+
+			lastID = docs[len(docs)-1]["_id"]
+			select {
+			case batchCh <- copyBatch{Docs: docs, ReadElapsed: time.Since(readStart)}:
+			case <-batchCtx.Done():
+				readErrCh <- batchCtx.Err()
+				return
+			}
+		}
+	}(progress.LastID)
+
+	for batch := range batchCh {
+		batchCount++
+		totalReadElapsed += batch.ReadElapsed
+
+		insertDocs := make([]interface{}, 0, len(batch.Docs))
+		for _, doc := range batch.Docs {
 			insertDocs = append(insertDocs, doc)
 		}
 
@@ -548,13 +552,13 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		_, err = targetColl.InsertMany(ctx, insertDocs, options.InsertMany().SetOrdered(false))
 		totalWriteElapsed += time.Since(writeStart)
 		if err != nil && !isIgnorableDuplicateError(err) {
-			logFailedInsertDocIDs(collection, docs, err)
+			cancel()
+			logFailedInsertDocIDs(collection, batch.Docs, err)
 			return fmt.Errorf("insert batch collection=%s: %w", collection, err)
 		}
 
-		lastID := docs[len(docs)-1]["_id"]
-		progress.LastID = lastID
-		progress.CopiedDocs += int64(len(docs))
+		progress.LastID = batch.Docs[len(batch.Docs)-1]["_id"]
+		progress.CopiedDocs += int64(len(batch.Docs))
 		if progress.TotalDocs > 0 && progress.CopiedDocs > progress.TotalDocs {
 			progress.CopiedDocs = progress.TotalDocs
 		}
@@ -568,6 +572,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 			"updated_at":  now,
 		}})
 		if err != nil {
+			cancel()
 			return fmt.Errorf("update checkpoint collection=%s: %w", collection, err)
 		}
 		totalCheckpointElapsed += time.Since(checkpointStart)
@@ -575,10 +580,41 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 
 		loggedPercent, err := m.logProgressIfNeeded(ctx, progress)
 		if err != nil {
+			cancel()
 			return err
 		}
 		progress.LastLoggedPercent = loggedPercent
 	}
+
+	if readErr := <-readErrCh; readErr != nil && !errors.Is(readErr, context.Canceled) {
+		return readErr
+	}
+
+	checkpointStart := time.Now()
+	now := time.Now().UTC()
+	_, err = m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
+		"status":       collectionStatusDone,
+		"updated_at":   now,
+		"completed_at": now,
+	}})
+	if err != nil {
+		return fmt.Errorf("mark collection done %s: %w", collection, err)
+	}
+	totalCheckpointElapsed += time.Since(checkpointStart)
+	m.renderLiveProgressLine(progress.Collection, 100, progress.CopiedDocs, progress.TotalDocs)
+	m.finishLiveProgressLine(collection)
+	if !m.liveProgressTTY {
+		log.Printf("collection=%s progress=100%% (%d/%d)", collection, progress.CopiedDocs, progress.TotalDocs)
+	}
+	log.Printf(
+		"collection=%s copy_done copied_docs=%d total_docs=%d elapsed=%s",
+		collection,
+		progress.CopiedDocs,
+		progress.TotalDocs,
+		formatElapsed(time.Since(collectionStart)),
+	)
+	logCopyTimingSummary(collection, batchCount, progress.CopiedDocs, totalReadElapsed, totalWriteElapsed, totalCheckpointElapsed)
+	return nil
 }
 
 func logCopyTimingSummary(collection string, batchCount, copiedDocs int64, readElapsed, writeElapsed, checkpointElapsed time.Duration) {
