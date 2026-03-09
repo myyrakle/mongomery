@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type Migrator struct {
 	progressColl   *mongo.Collection
 	jobsCollName      string
 	progressCollName  string
+	liveProgressTTY   bool
+	liveProgressActive bool
+	liveProgressColl  string
 }
 
 type collectionInfo struct {
@@ -106,6 +110,7 @@ func New(cfg Config) (*Migrator, error) {
 		progressColl:   targetClient.Database(cfg.Target.Database).Collection(progressName),
 		jobsCollName:     jobsName,
 		progressCollName: progressName,
+		liveProgressTTY:  isTTY(os.Stderr),
 	}
 
 	return m, nil
@@ -462,6 +467,8 @@ func (m *Migrator) validateTargetCollectionsExist(ctx context.Context, collectio
 }
 
 func (m *Migrator) copyCollection(ctx context.Context, collection string) error {
+	defer m.finishLiveProgressLine(collection)
+
 	progress, err := m.getCollectionProgress(ctx, collection)
 	if err != nil {
 		return err
@@ -505,7 +512,11 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 			if err != nil {
 				return fmt.Errorf("mark collection done %s: %w", collection, err)
 			}
-			log.Printf("collection=%s progress=100%% (%d/%d)", collection, progress.CopiedDocs, progress.TotalDocs)
+			m.renderLiveProgressLine(progress.Collection, 100, progress.CopiedDocs, progress.TotalDocs)
+			m.finishLiveProgressLine(collection)
+			if !m.liveProgressTTY {
+				log.Printf("collection=%s progress=100%% (%d/%d)", collection, progress.CopiedDocs, progress.TotalDocs)
+			}
 			return nil
 		}
 
@@ -536,6 +547,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		if err != nil {
 			return fmt.Errorf("update checkpoint collection=%s: %w", collection, err)
 		}
+		m.renderLiveProgressFromCounts(progress.Collection, progress.CopiedDocs, progress.TotalDocs)
 
 		loggedPercent, err := m.logProgressIfNeeded(ctx, progress)
 		if err != nil {
@@ -548,7 +560,9 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 func (m *Migrator) logProgressIfNeeded(ctx context.Context, progress CollectionProgress) (int, error) {
 	if progress.TotalDocs == 0 {
 		if progress.LastLoggedPercent < 100 {
-			log.Printf("collection=%s progress=100%% (0/0)", progress.Collection)
+			if !m.liveProgressTTY {
+				log.Printf("collection=%s progress=100%% (0/0)", progress.Collection)
+			}
 			_, err := m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
 				"last_logged_percent": 100,
 				"updated_at":          time.Now().UTC(),
@@ -580,7 +594,9 @@ func (m *Migrator) logProgressIfNeeded(ctx context.Context, progress CollectionP
 		return lastLogged, nil
 	}
 
-	log.Printf("collection=%s progress=%d%% (%d/%d)", progress.Collection, milestone, progress.CopiedDocs, progress.TotalDocs)
+	if !m.liveProgressTTY {
+		log.Printf("collection=%s progress=%d%% (%d/%d)", progress.Collection, milestone, progress.CopiedDocs, progress.TotalDocs)
+	}
 	_, err := m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
 		"last_logged_percent": milestone,
 		"updated_at":          time.Now().UTC(),
@@ -690,4 +706,50 @@ func isIgnorableDuplicateError(err error) bool {
 	}
 
 	return false
+}
+
+func (m *Migrator) renderLiveProgressFromCounts(collection string, copiedDocs, totalDocs int64) {
+	if totalDocs == 0 {
+		m.renderLiveProgressLine(collection, 100, copiedDocs, totalDocs)
+		return
+	}
+	percent := int((copiedDocs * 100) / totalDocs)
+	if percent > 100 {
+		percent = 100
+	}
+	m.renderLiveProgressLine(collection, percent, copiedDocs, totalDocs)
+}
+
+func (m *Migrator) renderLiveProgressLine(collection string, percent int, copiedDocs, totalDocs int64) {
+	if !m.liveProgressTTY {
+		return
+	}
+	if percent > 100 {
+		percent = 100
+	}
+
+	timestamp := time.Now().Format("2006/01/02 15:04:05")
+	fmt.Fprintf(os.Stderr, "\r%s collection=%s progress=%d%% (%d/%d)", timestamp, collection, percent, copiedDocs, totalDocs)
+	m.liveProgressActive = true
+	m.liveProgressColl = collection
+}
+
+func (m *Migrator) finishLiveProgressLine(collection string) {
+	if !m.liveProgressTTY || !m.liveProgressActive || m.liveProgressColl != collection {
+		return
+	}
+	fmt.Fprintln(os.Stderr)
+	m.liveProgressActive = false
+	m.liveProgressColl = ""
+}
+
+func isTTY(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
