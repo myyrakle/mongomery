@@ -423,6 +423,7 @@ func (m *Migrator) cloneIndexesFromSource(ctx context.Context, collection string
 		}
 		delete(idx, "v")
 		delete(idx, "ns")
+		sanitizeIndexCollation(idx)
 		indexes = append(indexes, idx)
 	}
 	if err := cur.Err(); err != nil {
@@ -772,4 +773,37 @@ func isTTY(file *os.File) bool {
 
 func formatElapsed(d time.Duration) time.Duration {
 	return d.Round(time.Millisecond)
+}
+
+func sanitizeIndexCollation(idx bson.M) {
+	rawCollation, ok := idx["collation"]
+	if !ok {
+		return
+	}
+
+	switch c := rawCollation.(type) {
+	case bson.M:
+		delete(c, "version")
+		if len(c) == 0 {
+			delete(idx, "collation")
+		}
+	case map[string]interface{}:
+		delete(c, "version")
+		if len(c) == 0 {
+			delete(idx, "collation")
+		}
+	case bson.D:
+		filtered := make(bson.D, 0, len(c))
+		for _, e := range c {
+			if e.Key == "version" {
+				continue
+			}
+			filtered = append(filtered, e)
+		}
+		if len(filtered) == 0 {
+			delete(idx, "collation")
+			return
+		}
+		idx["collation"] = filtered
+	}
 }
