@@ -41,6 +41,15 @@ func buildClientOptions(cfg MongoConnectionConfig) (*options.ClientOptions, erro
 		}
 		clientOptions.SetReadPreference(rp)
 	}
+	if len(cfg.Compressors) > 0 {
+		clientOptions.SetCompressors(cfg.Compressors)
+	}
+	if cfg.ZlibCompressionLevel != nil {
+		clientOptions.SetZlibLevel(*cfg.ZlibCompressionLevel)
+	}
+	if cfg.ZstdCompressionLevel != nil {
+		clientOptions.SetZstdLevel(*cfg.ZstdCompressionLevel)
+	}
 	if cfg.AuthSource != "" {
 		cred := options.Credential{AuthSource: cfg.AuthSource}
 		if clientOptions.Auth != nil {

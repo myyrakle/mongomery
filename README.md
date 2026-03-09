@@ -44,7 +44,9 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
     "password": "mypassword",
     "database": "app",
     "kind": "replica_set",
-    "read_preference": "primary"
+    "read_preference": "primary",
+    "compressors": ["zstd", "snappy", "zlib"],
+    "zlib_compression_level": 6
   },
   "target": {
     "host": "target-host:27017",
@@ -85,6 +87,9 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 - `srv`: `true`면 `host`를 `mongodb+srv://`로 해석
 - `retry_writes`: retryWrites 설정 오버라이드
 - `read_preference`: `primary`, `primaryPreferred`, `secondary`, `secondaryPreferred`, `nearest`
+- `compressors`: 네트워크 압축 우선순위 목록 (`snappy`, `zlib`, `zstd`)
+- `zlib_compression_level`: zlib 레벨 (`-1`~`9`, `compressors`에 `zlib` 필요)
+- `zstd_compression_level`: zstd 레벨 (`-131072`~`22`, `compressors`에 `zstd` 필요)
 - `app_name`: Mongo app name
 - `auth_source`: auth DB 오버라이드
 - `tls`: TLS 사용 여부

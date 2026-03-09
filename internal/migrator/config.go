@@ -29,28 +29,31 @@ type Config struct {
 
 // MongoConnectionConfig controls how each MongoDB endpoint is initialized.
 type MongoConnectionConfig struct {
-	FullURI                  string `json:"full_uri"`
-	Host                     string `json:"host"`
-	UseSRV                   bool   `json:"srv"`
-	Username                 string `json:"username"`
-	Password                 string `json:"password"`
-	Database                 string `json:"database"`
-	Kind                     string `json:"kind"`
-	ReplicaSet               string `json:"replica_set"`
-	DirectConnection         *bool  `json:"direct_connection"`
-	RetryWrites              *bool  `json:"retry_writes"`
-	ReadPreference           string `json:"read_preference"`
-	AppName                  string `json:"app_name"`
+	FullURI                  string   `json:"full_uri"`
+	Host                     string   `json:"host"`
+	UseSRV                   bool     `json:"srv"`
+	Username                 string   `json:"username"`
+	Password                 string   `json:"password"`
+	Database                 string   `json:"database"`
+	Kind                     string   `json:"kind"`
+	ReplicaSet               string   `json:"replica_set"`
+	DirectConnection         *bool    `json:"direct_connection"`
+	RetryWrites              *bool    `json:"retry_writes"`
+	ReadPreference           string   `json:"read_preference"`
+	Compressors              []string `json:"compressors"`
+	ZlibCompressionLevel     *int     `json:"zlib_compression_level"`
+	ZstdCompressionLevel     *int     `json:"zstd_compression_level"`
+	AppName                  string   `json:"app_name"`
 	AuthSource               string   `json:"auth_source"`
 	SkipCollections          []string `json:"skip_collections"`
-	TLS                      *bool  `json:"tls"`
-	TLSCAFile                string `json:"tls_ca_file"`
-	TLSInsecureSkipVerify    bool   `json:"tls_insecure_skip_verify"`
-	ConnectTimeoutMS         int    `json:"connect_timeout_ms"`
-	ServerSelectionTimeoutMS int    `json:"server_selection_timeout_ms"`
-	SocketTimeoutMS          int    `json:"socket_timeout_ms"`
-	MaxPoolSize              uint64 `json:"max_pool_size"`
-	MinPoolSize              uint64 `json:"min_pool_size"`
+	TLS                      *bool    `json:"tls"`
+	TLSCAFile                string   `json:"tls_ca_file"`
+	TLSInsecureSkipVerify    bool     `json:"tls_insecure_skip_verify"`
+	ConnectTimeoutMS         int      `json:"connect_timeout_ms"`
+	ServerSelectionTimeoutMS int      `json:"server_selection_timeout_ms"`
+	SocketTimeoutMS          int      `json:"socket_timeout_ms"`
+	MaxPoolSize              uint64   `json:"max_pool_size"`
+	MinPoolSize              uint64   `json:"min_pool_size"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -181,6 +184,8 @@ func (c *MongoConnectionConfig) applyDefaults() {
 			c.ReadPreference = "secondaryPreferred"
 		}
 	}
+
+	c.Compressors = normalizeCompressors(c.Compressors)
 }
 
 func (c MongoConnectionConfig) Validate(field string) error {
@@ -204,6 +209,26 @@ func (c MongoConnectionConfig) Validate(field string) error {
 		if _, err := parseReadPreference(c.ReadPreference); err != nil {
 			return fmt.Errorf("%s.read_preference: %w", field, err)
 		}
+	}
+	if err := validateCompressors(c.Compressors); err != nil {
+		return fmt.Errorf("%s.compressors: %w", field, err)
+	}
+	if c.ZlibCompressionLevel != nil {
+		if *c.ZlibCompressionLevel < -1 || *c.ZlibCompressionLevel > 9 {
+			return fmt.Errorf("%s.zlib_compression_level must be between -1 and 9", field)
+		}
+	}
+	if c.ZstdCompressionLevel != nil {
+		if *c.ZstdCompressionLevel < -131072 || *c.ZstdCompressionLevel > 22 {
+			return fmt.Errorf("%s.zstd_compression_level must be between -131072 and 22", field)
+		}
+	}
+	effectiveCompressors := c.effectiveCompressors()
+	if c.ZlibCompressionLevel != nil && !containsCompressor(effectiveCompressors, "zlib") {
+		return fmt.Errorf("%s.zlib_compression_level requires compressors to include zlib", field)
+	}
+	if c.ZstdCompressionLevel != nil && !containsCompressor(effectiveCompressors, "zstd") {
+		return fmt.Errorf("%s.zstd_compression_level requires compressors to include zstd", field)
 	}
 
 	if c.UseSRV {
@@ -354,4 +379,69 @@ func (c MongoConnectionConfig) EndpointKey() string {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func normalizeCompressors(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, compressor := range in {
+		normalized := strings.ToLower(strings.TrimSpace(compressor))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func validateCompressors(compressors []string) error {
+	for _, compressor := range compressors {
+		switch compressor {
+		case "snappy", "zlib", "zstd":
+		default:
+			return fmt.Errorf("unsupported value %q (allowed: snappy, zlib, zstd)", compressor)
+		}
+	}
+	return nil
+}
+
+func containsCompressor(compressors []string, target string) bool {
+	for _, compressor := range compressors {
+		if compressor == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (c MongoConnectionConfig) effectiveCompressors() []string {
+	if len(c.Compressors) > 0 {
+		return c.Compressors
+	}
+
+	fullURI := strings.TrimSpace(c.FullURI)
+	if fullURI == "" {
+		return nil
+	}
+	parsed, err := url.Parse(fullURI)
+	if err != nil {
+		return nil
+	}
+
+	raw := parsed.Query().Get("compressors")
+	if raw == "" {
+		return nil
+	}
+	return normalizeCompressors(strings.Split(raw, ","))
 }

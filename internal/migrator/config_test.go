@@ -300,6 +300,79 @@ func TestLoadConfig_RejectsSRVWithPort(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_NormalizesCompressors(t *testing.T) {
+	t.Parallel()
+
+	cfg := mustLoadConfigFromJSON(t, `{
+		"source": {
+			"host":"source:27017",
+			"database":"app",
+			"compressors":[" ZSTD ","snappy","zstd","zlib"]
+		},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if len(cfg.Source.Compressors) != 3 {
+		t.Fatalf("expected normalized unique compressors, got %v", cfg.Source.Compressors)
+	}
+	if cfg.Source.Compressors[0] != "zstd" || cfg.Source.Compressors[1] != "snappy" || cfg.Source.Compressors[2] != "zlib" {
+		t.Fatalf("unexpected normalized compressors: %v", cfg.Source.Compressors)
+	}
+}
+
+func TestLoadConfig_RejectsInvalidCompressor(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {
+			"host":"source:27017",
+			"database":"app",
+			"compressors":["gzip"]
+		},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for invalid compressor")
+	}
+	if !strings.Contains(err.Error(), "source.compressors") {
+		t.Fatalf("expected source.compressors in error, got: %v", err)
+	}
+}
+
+func TestLoadConfig_RejectsZlibLevelWithoutZlibCompressor(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadConfigFromJSON(t, `{
+		"source": {
+			"host":"source:27017",
+			"database":"app",
+			"compressors":["zstd"],
+			"zlib_compression_level":6
+		},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if err == nil {
+		t.Fatalf("expected error for zlib_compression_level without zlib compressor")
+	}
+	if !strings.Contains(err.Error(), "source.zlib_compression_level requires compressors to include zlib") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfig_AcceptsZlibLevelWhenFullURIHasZlibCompressor(t *testing.T) {
+	t.Parallel()
+
+	cfg := mustLoadConfigFromJSON(t, `{
+		"source": {
+			"full_uri":"mongodb://source:27017/app?compressors=zstd,zlib",
+			"zlib_compression_level":6
+		},
+		"target": {"host":"target:27017","database":"app_copy"}
+	}`)
+	if cfg.Source.ZlibCompressionLevel == nil || *cfg.Source.ZlibCompressionLevel != 6 {
+		t.Fatalf("expected zlib_compression_level=6, got %v", cfg.Source.ZlibCompressionLevel)
+	}
+}
+
 func mustLoadConfigFromJSON(t *testing.T, raw string) Config {
 	t.Helper()
 	cfg, err := loadConfigFromJSON(t, raw)

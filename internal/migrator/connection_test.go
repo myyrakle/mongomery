@@ -148,3 +148,36 @@ func TestBuildConnectionURI_RejectsMissingHost(t *testing.T) {
 		t.Fatalf("expected buildConnectionURI to fail with missing host")
 	}
 }
+
+func TestBuildClientOptions_AppliesCompressionOptions(t *testing.T) {
+	t.Parallel()
+
+	cfg := MongoConnectionConfig{
+		Host:                 "mongo:27017",
+		Database:             "app",
+		Compressors:          []string{"zstd", "snappy", "zlib"},
+		ZlibCompressionLevel: intPtr(6),
+		ZstdCompressionLevel: intPtr(10),
+	}
+
+	opts, err := buildClientOptions(cfg)
+	if err != nil {
+		t.Fatalf("buildClientOptions failed: %v", err)
+	}
+	if len(opts.Compressors) != 3 {
+		t.Fatalf("expected 3 compressors, got %d", len(opts.Compressors))
+	}
+	if opts.Compressors[0] != "zstd" || opts.Compressors[1] != "snappy" || opts.Compressors[2] != "zlib" {
+		t.Fatalf("unexpected compressors order: %#v", opts.Compressors)
+	}
+	if opts.ZlibLevel == nil || *opts.ZlibLevel != 6 {
+		t.Fatalf("expected zlib level 6, got %v", opts.ZlibLevel)
+	}
+	if opts.ZstdLevel == nil || *opts.ZstdLevel != 10 {
+		t.Fatalf("expected zstd level 10, got %v", opts.ZstdLevel)
+	}
+}
+
+func intPtr(v int) *int {
+	return &v
+}

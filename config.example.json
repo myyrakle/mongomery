@@ -5,7 +5,9 @@
     "password": "mypassword",
     "database": "app",
     "kind": "replica_set",
-    "read_preference": "primary"
+    "read_preference": "primary",
+    "compressors": ["zstd", "snappy", "zlib"],
+    "zlib_compression_level": 6
   },
   "target": {
     "full_uri": "mongodb://target-host:27017/app_migrated",

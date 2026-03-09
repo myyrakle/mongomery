@@ -25,18 +25,18 @@ const (
 )
 
 type Migrator struct {
-	cfg            Config
-	sourceClient   *mongo.Client
-	targetClient   *mongo.Client
-	sourceDB       *mongo.Database
-	targetDB       *mongo.Database
-	jobsColl       *mongo.Collection
-	progressColl   *mongo.Collection
-	jobsCollName      string
-	progressCollName  string
-	liveProgressTTY   bool
+	cfg                Config
+	sourceClient       *mongo.Client
+	targetClient       *mongo.Client
+	sourceDB           *mongo.Database
+	targetDB           *mongo.Database
+	jobsColl           *mongo.Collection
+	progressColl       *mongo.Collection
+	jobsCollName       string
+	progressCollName   string
+	liveProgressTTY    bool
 	liveProgressActive bool
-	liveProgressColl  string
+	liveProgressColl   string
 }
 
 type collectionInfo struct {
@@ -101,13 +101,13 @@ func New(cfg Config) (*Migrator, error) {
 	progressName := cfg.MetaCollectionPrefix + "_collections"
 
 	m := &Migrator{
-		cfg:            cfg,
-		sourceClient:   sourceClient,
-		targetClient:   targetClient,
-		sourceDB:       sourceClient.Database(cfg.Source.Database),
-		targetDB:       targetClient.Database(cfg.Target.Database),
-		jobsColl:       targetClient.Database(cfg.Target.Database).Collection(jobsName),
-		progressColl:   targetClient.Database(cfg.Target.Database).Collection(progressName),
+		cfg:              cfg,
+		sourceClient:     sourceClient,
+		targetClient:     targetClient,
+		sourceDB:         sourceClient.Database(cfg.Source.Database),
+		targetDB:         targetClient.Database(cfg.Target.Database),
+		jobsColl:         targetClient.Database(cfg.Target.Database).Collection(jobsName),
+		progressColl:     targetClient.Database(cfg.Target.Database).Collection(progressName),
 		jobsCollName:     jobsName,
 		progressCollName: progressName,
 		liveProgressTTY:  isTTY(os.Stderr),
@@ -487,6 +487,10 @@ func (m *Migrator) validateTargetCollectionsExist(ctx context.Context, collectio
 func (m *Migrator) copyCollection(ctx context.Context, collection string) error {
 	collectionStart := time.Now()
 	defer m.finishLiveProgressLine(collection)
+	var totalReadElapsed time.Duration
+	var totalWriteElapsed time.Duration
+	var totalCheckpointElapsed time.Duration
+	var batchCount int64
 
 	progress, err := m.getCollectionProgress(ctx, collection)
 	if err != nil {
@@ -509,6 +513,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		}
 
 		opts := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}).SetLimit(int64(m.cfg.BatchSize))
+		readStart := time.Now()
 		cur, err := sourceColl.Find(ctx, filter, opts)
 		if err != nil {
 			return fmt.Errorf("find batch collection=%s: %w", collection, err)
@@ -520,8 +525,10 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 			return fmt.Errorf("decode batch collection=%s: %w", collection, err)
 		}
 		_ = cur.Close(ctx)
+		totalReadElapsed += time.Since(readStart)
 
 		if len(docs) == 0 {
+			checkpointStart := time.Now()
 			now := time.Now().UTC()
 			_, err := m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
 				"status":       collectionStatusDone,
@@ -531,6 +538,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 			if err != nil {
 				return fmt.Errorf("mark collection done %s: %w", collection, err)
 			}
+			totalCheckpointElapsed += time.Since(checkpointStart)
 			m.renderLiveProgressLine(progress.Collection, 100, progress.CopiedDocs, progress.TotalDocs)
 			m.finishLiveProgressLine(collection)
 			if !m.liveProgressTTY {
@@ -543,15 +551,19 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 				progress.TotalDocs,
 				formatElapsed(time.Since(collectionStart)),
 			)
+			logCopyTimingSummary(collection, batchCount, progress.CopiedDocs, totalReadElapsed, totalWriteElapsed, totalCheckpointElapsed)
 			return nil
 		}
+		batchCount++
 
 		insertDocs := make([]interface{}, 0, len(docs))
 		for _, doc := range docs {
 			insertDocs = append(insertDocs, doc)
 		}
 
+		writeStart := time.Now()
 		_, err = targetColl.InsertMany(ctx, insertDocs, options.InsertMany().SetOrdered(false))
+		totalWriteElapsed += time.Since(writeStart)
 		if err != nil && !isIgnorableDuplicateError(err) {
 			logFailedInsertDocIDs(collection, docs, err)
 			return fmt.Errorf("insert batch collection=%s: %w", collection, err)
@@ -564,6 +576,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 			progress.CopiedDocs = progress.TotalDocs
 		}
 
+		checkpointStart := time.Now()
 		now := time.Now().UTC()
 		_, err = m.progressColl.UpdateOne(ctx, bson.M{"_id": progress.ID}, bson.M{"$set": bson.M{
 			"status":      collectionStatusCopying,
@@ -574,6 +587,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		if err != nil {
 			return fmt.Errorf("update checkpoint collection=%s: %w", collection, err)
 		}
+		totalCheckpointElapsed += time.Since(checkpointStart)
 		m.renderLiveProgressFromCounts(progress.Collection, progress.CopiedDocs, progress.TotalDocs)
 
 		loggedPercent, err := m.logProgressIfNeeded(ctx, progress)
@@ -582,6 +596,31 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		}
 		progress.LastLoggedPercent = loggedPercent
 	}
+}
+
+func logCopyTimingSummary(collection string, batchCount, copiedDocs int64, readElapsed, writeElapsed, checkpointElapsed time.Duration) {
+	totalMeasured := readElapsed + writeElapsed + checkpointElapsed
+	if totalMeasured <= 0 {
+		log.Printf("collection=%s timing batches=%d copied_docs=%d (no measured time)", collection, batchCount, copiedDocs)
+		return
+	}
+
+	readPct := float64(readElapsed) * 100 / float64(totalMeasured)
+	writePct := float64(writeElapsed) * 100 / float64(totalMeasured)
+	checkpointPct := float64(checkpointElapsed) * 100 / float64(totalMeasured)
+	log.Printf(
+		"collection=%s timing batches=%d copied_docs=%d read=%s(%.1f%%) write=%s(%.1f%%) checkpoint=%s(%.1f%%) measured_total=%s",
+		collection,
+		batchCount,
+		copiedDocs,
+		formatElapsed(readElapsed),
+		readPct,
+		formatElapsed(writeElapsed),
+		writePct,
+		formatElapsed(checkpointElapsed),
+		checkpointPct,
+		formatElapsed(totalMeasured),
+	)
 }
 
 func (m *Migrator) logProgressIfNeeded(ctx context.Context, progress CollectionProgress) (int, error) {
