@@ -444,6 +444,15 @@ func (m *Migrator) cloneIndexesFromSource(ctx context.Context, collection string
 			log.Printf("schema=collection=%s indexes_already_synced=true", collection)
 			return nil
 		}
+		if isUnsupportedCreateIndexError(err) {
+			log.Printf("schema=collection=%s indexes_batch_unsupported=true fallback=single", collection)
+			createdCount, skippedCount, fallbackErr := m.createIndexesIndividually(ctx, collection, indexes)
+			if fallbackErr != nil {
+				return fallbackErr
+			}
+			log.Printf("schema=collection=%s indexes_created=%d indexes_skipped=%d mode=single", collection, createdCount, skippedCount)
+			return nil
+		}
 		return fmt.Errorf("create indexes for %s: %w", collection, err)
 	}
 
@@ -675,6 +684,17 @@ func isNamespaceExistsError(err error) bool {
 	return false
 }
 
+func isUnsupportedCreateIndexError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "unsupported feature") {
+		return true
+	}
+	if strings.Contains(msg, "not supported") {
+		return true
+	}
+	return false
+}
+
 func isIgnorableCreateIndexError(err error) bool {
 	var cmdErr mongo.CommandError
 	if errors.As(err, &cmdErr) {
@@ -747,6 +767,44 @@ func isIgnorableDuplicateError(err error) bool {
 	}
 
 	return false
+}
+
+func (m *Migrator) createIndexesIndividually(ctx context.Context, collection string, indexes []interface{}) (int, int, error) {
+	createdCount := 0
+	skippedCount := 0
+
+	for _, index := range indexes {
+		cmd := bson.D{
+			{Key: "createIndexes", Value: collection},
+			{Key: "indexes", Value: []interface{}{index}},
+		}
+		if err := m.targetDB.RunCommand(ctx, cmd).Err(); err != nil {
+			if isIgnorableCreateIndexError(err) {
+				skippedCount++
+				continue
+			}
+			if isUnsupportedCreateIndexError(err) {
+				indexName := "<unknown>"
+				if doc, ok := index.(bson.M); ok {
+					if n, ok := doc["name"].(string); ok && n != "" {
+						indexName = n
+					}
+				}
+				log.Printf(
+					"schema=collection=%s index=%s skipped reason=unsupported_feature detail=%q",
+					collection,
+					indexName,
+					err.Error(),
+				)
+				skippedCount++
+				continue
+			}
+			return createdCount, skippedCount, fmt.Errorf("create index for %s: %w", collection, err)
+		}
+		createdCount++
+	}
+
+	return createdCount, skippedCount, nil
 }
 
 func (m *Migrator) renderLiveProgressFromCounts(collection string, copiedDocs, totalDocs int64) {
