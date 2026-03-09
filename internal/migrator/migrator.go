@@ -553,6 +553,7 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 
 		_, err = targetColl.InsertMany(ctx, insertDocs, options.InsertMany().SetOrdered(false))
 		if err != nil && !isIgnorableDuplicateError(err) {
+			logFailedInsertDocIDs(collection, docs, err)
 			return fmt.Errorf("insert batch collection=%s: %w", collection, err)
 		}
 
@@ -729,44 +730,117 @@ func isIgnorableCreateIndexError(err error) bool {
 }
 
 func isIgnorableDuplicateError(err error) bool {
-	var bulkErr mongo.BulkWriteException
-	if errors.As(err, &bulkErr) {
-		if bulkErr.WriteConcernError != nil {
+	allDupCodes := func(codes []int) bool {
+		if len(codes) == 0 {
 			return false
 		}
-		if len(bulkErr.WriteErrors) == 0 {
-			return false
-		}
-		for _, w := range bulkErr.WriteErrors {
-			if w.Code != 11000 {
+		for _, c := range codes {
+			if c != 11000 {
 				return false
 			}
 		}
 		return true
+	}
+
+	var bulkErr mongo.BulkWriteException
+	if errors.As(err, &bulkErr) {
+		codes := make([]int, 0, len(bulkErr.WriteErrors))
+		for _, w := range bulkErr.WriteErrors {
+			codes = append(codes, w.Code)
+		}
+		if allDupCodes(codes) {
+			return true
+		}
+	}
+	var bulkErrPtr *mongo.BulkWriteException
+	if errors.As(err, &bulkErrPtr) && bulkErrPtr != nil {
+		codes := make([]int, 0, len(bulkErrPtr.WriteErrors))
+		for _, w := range bulkErrPtr.WriteErrors {
+			codes = append(codes, w.Code)
+		}
+		if allDupCodes(codes) {
+			return true
+		}
 	}
 
 	var writeErr mongo.WriteException
 	if errors.As(err, &writeErr) {
-		if writeErr.WriteConcernError != nil {
-			return false
-		}
-		if len(writeErr.WriteErrors) == 0 {
-			return false
-		}
+		codes := make([]int, 0, len(writeErr.WriteErrors))
 		for _, w := range writeErr.WriteErrors {
-			if w.Code != 11000 {
-				return false
+			codes = append(codes, w.Code)
+		}
+		if allDupCodes(codes) {
+			return true
+		}
+	}
+	var writeErrPtr *mongo.WriteException
+	if errors.As(err, &writeErrPtr) && writeErrPtr != nil {
+		codes := make([]int, 0, len(writeErrPtr.WriteErrors))
+		for _, w := range writeErrPtr.WriteErrors {
+			codes = append(codes, w.Code)
+		}
+		if allDupCodes(codes) {
+			return true
+		}
+	}
+
+	var cmdErr mongo.CommandError
+	if errors.As(err, &cmdErr) && cmdErr.Code == 11000 {
+		return true
+	}
+	var cmdErrPtr *mongo.CommandError
+	if errors.As(err, &cmdErrPtr) && cmdErrPtr != nil && cmdErrPtr.Code == 11000 {
+		return true
+	}
+
+	// Fallback for driver-wrapped messages that still only indicate duplicate key failures.
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "e11000 duplicate key error")
+}
+
+func logFailedInsertDocIDs(collection string, docs []bson.M, err error) {
+	logSingle := func(index int, code int, msg string) {
+		docID := "<unknown>"
+		if index >= 0 && index < len(docs) {
+			if id, ok := docs[index]["_id"]; ok {
+				docID = fmt.Sprintf("%v", id)
 			}
 		}
-		return true
+		log.Printf(
+			"collection=%s failed_doc_id=%s batch_index=%d code=%d msg=%q",
+			collection,
+			docID,
+			index,
+			code,
+			msg,
+		)
+	}
+
+	var bulkErr mongo.BulkWriteException
+	if errors.As(err, &bulkErr) {
+		for _, w := range bulkErr.WriteErrors {
+			logSingle(w.Index, w.Code, w.Message)
+		}
+		return
+	}
+
+	var writeErr mongo.WriteException
+	if errors.As(err, &writeErr) {
+		for _, w := range writeErr.WriteErrors {
+			logSingle(w.Index, w.Code, w.Message)
+		}
+		return
 	}
 
 	var cmdErr mongo.CommandError
 	if errors.As(err, &cmdErr) {
-		return cmdErr.Code == 11000
+		log.Printf(
+			"collection=%s failed_doc_id=<unknown> batch_index=-1 code=%d msg=%q",
+			collection,
+			cmdErr.Code,
+			cmdErr.Message,
+		)
 	}
-
-	return false
 }
 
 func (m *Migrator) createIndexesIndividually(ctx context.Context, collection string, indexes []interface{}) (int, int, error) {
