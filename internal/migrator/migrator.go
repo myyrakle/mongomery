@@ -543,22 +543,16 @@ func (m *Migrator) copyCollection(ctx context.Context, collection string) error 
 		batchCount++
 		totalReadElapsed += batch.ReadElapsed
 
-		insertDocs := make([]interface{}, 0, len(batch.Docs))
-		for _, doc := range batch.Docs {
-			insertDocs = append(insertDocs, doc)
-		}
-
 		writeStart := time.Now()
-		_, err = targetColl.InsertMany(ctx, insertDocs, options.InsertMany().SetOrdered(false))
+		insertedCount, skippedCount, err := m.insertBatchWithSkips(ctx, targetColl, collection, batch.Docs, 0)
 		totalWriteElapsed += time.Since(writeStart)
-		if err != nil && !isIgnorableDuplicateError(err) {
+		if err != nil {
 			cancel()
-			logFailedInsertDocIDs(collection, batch.Docs, err)
 			return fmt.Errorf("insert batch collection=%s: %w", collection, err)
 		}
 
 		progress.LastID = batch.Docs[len(batch.Docs)-1]["_id"]
-		progress.CopiedDocs += int64(len(batch.Docs))
+		progress.CopiedDocs += int64(insertedCount + skippedCount)
 		if progress.TotalDocs > 0 && progress.CopiedDocs > progress.TotalDocs {
 			progress.CopiedDocs = progress.TotalDocs
 		}
@@ -901,6 +895,75 @@ func logFailedInsertDocIDs(collection string, docs []bson.M, err error) {
 	}
 }
 
+func (m *Migrator) insertBatchWithSkips(ctx context.Context, targetColl *mongo.Collection, collection string, docs []bson.M, offset int) (int, int, error) {
+	if len(docs) == 0 {
+		return 0, 0, nil
+	}
+
+	err := insertDocumentBatch(ctx, targetColl, docs)
+	if err == nil || isIgnorableDuplicateError(err) {
+		return len(docs), 0, nil
+	}
+
+	if len(docs) == 1 {
+		docID := "<unknown>"
+		if id, ok := docs[0]["_id"]; ok {
+			docID = fmt.Sprintf("%v", id)
+		}
+		if isSkippableMalformedDocumentError(err) {
+			if m.cfg.ShouldSkipMalformedDocuments() {
+				log.Printf(
+					"collection=%s skipped_doc_id=%s batch_index=%d reason=%q",
+					collection,
+					docID,
+					offset,
+					err.Error(),
+				)
+				return 0, 1, nil
+			}
+		}
+
+		log.Printf(
+			"collection=%s failed_doc_id=%s batch_index=%d msg=%q",
+			collection,
+			docID,
+			offset,
+			err.Error(),
+		)
+		return 0, 0, err
+	}
+
+	logFailedInsertDocIDs(collection, docs, err)
+	mid := len(docs) / 2
+	leftInserted, leftSkipped, err := m.insertBatchWithSkips(ctx, targetColl, collection, docs[:mid], offset)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	rightInserted, rightSkipped, err := m.insertBatchWithSkips(ctx, targetColl, collection, docs[mid:], offset+mid)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return leftInserted + rightInserted, leftSkipped + rightSkipped, nil
+}
+
+func insertDocumentBatch(ctx context.Context, targetColl *mongo.Collection, docs []bson.M) error {
+	insertDocs := make([]interface{}, 0, len(docs))
+	for _, doc := range docs {
+		insertDocs = append(insertDocs, doc)
+	}
+
+	_, err := targetColl.InsertMany(ctx, insertDocs, options.InsertMany().SetOrdered(false))
+	return err
+}
+
+func isSkippableMalformedDocumentError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "invalid utf-8 string in bson document") ||
+		strings.Contains(msg, "badly formed input data")
+}
+
 func (m *Migrator) createIndexesIndividually(ctx context.Context, collection string, indexes []interface{}) (int, int, error) {
 	createdCount := 0
 	skippedCount := 0
@@ -998,7 +1061,6 @@ func sanitizeIndexCollation(idx bson.M) {
 	if !ok {
 		return
 	}
-
 
 	switch c := rawCollation.(type) {
 	case bson.M:

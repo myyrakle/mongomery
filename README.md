@@ -59,7 +59,8 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
   "job_id": "snapshot-20260306",
   "meta_prefix": "__mongomery",
   "batch_size": 1000,
-  "log_percent_step": 5
+  "log_percent_step": 5,
+  "skip_malformed_documents": true
 }
 ```
 
@@ -70,6 +71,7 @@ CDC는 지원하지 않으며, 한 번 전체를 돌고 종료합니다.
 - `meta_prefix`: 메타 컬렉션 prefix (기본 `__mongomery`)
 - `batch_size`: 데이터 복제 배치 크기 (기본 `1000`)
 - `log_percent_step`: 퍼센트 로그 간격 (기본 `5`)
+- `skip_malformed_documents`: 잘못된 BSON 문서를 skip할지 여부 (기본 `true`)
 
 ### source/target 연결 필드
 
@@ -142,6 +144,14 @@ go run . --config ./config.json copy
 go run . --config ./config.json --command verify
 go run . --config ./config.json --command schema
 go run . --config ./config.json --command copy
+
+# malformed BSON skip 비활성화는 config.json에서 설정
+```
+
+```json
+{
+  "skip_malformed_documents": false
+}
 ```
 
 ### 모드 정리

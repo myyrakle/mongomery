@@ -25,6 +25,7 @@ type Config struct {
 	MetaCollectionPrefix string                `json:"meta_prefix"`
 	BatchSize            int                   `json:"batch_size"`
 	LogPercentStep       int                   `json:"log_percent_step"`
+	SkipMalformedDocs    *bool                 `json:"skip_malformed_documents"`
 }
 
 // MongoConnectionConfig controls how each MongoDB endpoint is initialized.
@@ -104,6 +105,9 @@ func (c *Config) applyDefaults() {
 	if c.LogPercentStep == 0 {
 		c.LogPercentStep = 5
 	}
+	if c.SkipMalformedDocs == nil {
+		c.SkipMalformedDocs = boolPtr(true)
+	}
 
 	c.Source.applyDefaults()
 	c.Target.applyDefaults()
@@ -133,6 +137,10 @@ func (c Config) Validate() error {
 	}
 
 	return nil
+}
+
+func (c Config) ShouldSkipMalformedDocuments() bool {
+	return c.SkipMalformedDocs != nil && *c.SkipMalformedDocs
 }
 
 func (c *MongoConnectionConfig) applyDefaults() {
